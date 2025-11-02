@@ -68,10 +68,24 @@ class ChatViewModel @Inject constructor(
         getMessagesUseCase(sessionId)
             .onEach { messages ->
                 val currentState = _state.value
+                // Only preserve streaming state if we're actually still streaming
+                // If streaming has completed (no streaming message in the list), don't preserve it
+                val hasStreamingMessage = messages.any { it.id == "streaming" }
+                val preserveStreaming = currentState is ChatState.Success && currentState.isStreaming && hasStreamingMessage
+                val preserveWaiting = currentState is ChatState.Success && currentState.isWaitingForResponse
+                val preserveStreamingContent = if (preserveStreaming && currentState is ChatState.Success) currentState.streamingContent else ""
+                
+                Log.d(TAG, "loadMessages: preserveStreaming=$preserveStreaming (hasStreamingMessage=$hasStreamingMessage), preserveWaiting=$preserveWaiting")
+                
                 _state.value = ChatState.Success(
                     messages = messages,
-                    lastError = if (currentState is ChatState.Success) currentState.lastError else null
+                    lastError = if (currentState is ChatState.Success) currentState.lastError else null,
+                    isStreaming = preserveStreaming,
+                    streamingContent = preserveStreamingContent,
+                    isWaitingForResponse = preserveWaiting
                 )
+                
+                Log.d(TAG, "loadMessages: Updated state, isStreaming=${(_state.value as? ChatState.Success)?.isStreaming}")
             }
             .catch { e ->
                 Log.e(TAG, "Failed to load messages", e)
@@ -109,17 +123,20 @@ class ChatViewModel @Inject constructor(
                 
                 Log.d(TAG, "Sending message: $content")
                 
-                // Update state to show user message and streaming
+                // Update state to show user message and waiting for response
                 _state.value = ChatState.Success(
                     messages = messagesWithUser,
                     isStreaming = true,
                     streamingContent = "",
-                    lastError = null // Clear any previous error
+                    lastError = null, // Clear any previous error
+                    isWaitingForResponse = true // Show loading animation while waiting for first chunk
                 )
+                Log.d(TAG, "Set isWaitingForResponse = true")
                 
                 var accumulatedContent = ""
                 var hasError = false
                 var errorMessage: String? = null
+                var hasReceivedFirstChunk = false
                 
                 sendMessageUseCase(sessionId, content, modelId)
                     .catch { e ->
@@ -133,10 +150,18 @@ class ChatViewModel @Inject constructor(
                             messages = messagesWithUser,
                             isStreaming = false,
                             streamingContent = "",
-                            lastError = errorMessage
+                            lastError = errorMessage,
+                            isWaitingForResponse = false
                         )
+                        Log.d(TAG, "Set isWaitingForResponse = false (error)")
                     }
                     .collect { chunk ->
+                        // First chunk received - hide loading animation
+                        if (!hasReceivedFirstChunk) {
+                            hasReceivedFirstChunk = true
+                            Log.d(TAG, "First chunk received, hiding loading indicator")
+                        }
+                        
                         accumulatedContent += chunk
                         Log.d(TAG, "Received chunk: ${chunk.take(50)}...")
                         
@@ -151,17 +176,33 @@ class ChatViewModel @Inject constructor(
                         
                         val updatedMessages = messagesWithUser + streamingMessage
                         
+                        // Only hide waiting indicator once we have actual content
+                        // This ensures thinking animation shows even if SSE stream starts but first chunk is empty
+                        val hasContent = accumulatedContent.isNotBlank()
+                        
                         _state.value = ChatState.Success(
                             messages = updatedMessages,
                             isStreaming = true,
                             streamingContent = accumulatedContent,
-                            lastError = null // Clear error when receiving chunks
+                            lastError = null, // Clear error when receiving chunks
+                            isWaitingForResponse = !hasContent // Keep showing loading if content is still empty
                         )
                     }
                 
                 if (!hasError) {
                     Log.d(TAG, "Streaming complete. Total content length: ${accumulatedContent.length}")
+                    // Ensure isWaitingForResponse and isStreaming are false after streaming completes
+                    val finalState = _state.value
+                    if (finalState is ChatState.Success) {
+                        _state.value = finalState.copy(
+                            isWaitingForResponse = false,
+                            isStreaming = false,
+                            streamingContent = ""
+                        )
+                        Log.d(TAG, "Cleared isWaitingForResponse and isStreaming after streaming complete")
+                    }
                     // Reload messages to get the saved version from database
+                    // Note: loadMessages() will preserve streaming state, but we've already set it to false above
                     loadMessages()
                 }
                 
@@ -181,7 +222,8 @@ class ChatViewModel @Inject constructor(
                     messages = currentMessages,
                     isStreaming = false,
                     streamingContent = "",
-                    lastError = e.message ?: "Failed to send message"
+                    lastError = e.message ?: "Failed to send message",
+                    isWaitingForResponse = false
                 )
             }
         }
@@ -190,7 +232,7 @@ class ChatViewModel @Inject constructor(
     private fun clearError() {
         val currentState = _state.value
         if (currentState is ChatState.Success) {
-            _state.value = currentState.copy(lastError = null)
+            _state.value = currentState.copy(lastError = null, isWaitingForResponse = false)
         } else if (currentState is ChatState.Error) {
             loadMessages()
         }

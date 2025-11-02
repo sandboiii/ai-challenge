@@ -44,7 +44,8 @@ class ModelSelectionViewModel @Inject constructor(
                         id = dto.id,
                         name = dto.name,
                         provider = dto.provider,
-                        description = dto.description
+                        description = dto.description,
+                        pricing = dto.pricing
                     )
                 }
                 Log.d(TAG, "Successfully loaded ${domainModels.size} models")

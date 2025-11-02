@@ -8,6 +8,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -25,15 +26,20 @@ import java.util.*
 fun SessionsScreen(
     onSessionClick: (String, String) -> Unit,
     onNavigateToModelSelection: () -> Unit = {},
+    onNavigateToSettings: () -> Unit = {},
     viewModel: SessionsViewModel = hiltViewModel()
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val state by viewModel.state.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = SessionsState.Loading)
     val selectedModel by viewModel.selectedModel.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = null)
-    val selectedModelName by viewModel.selectedModelName.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = null)
+    val createdSession by viewModel.createdSession.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = null)
     
-    LaunchedEffect(Unit) {
-        viewModel.refreshSelectedModelName()
+    // Navigate to newly created session
+    LaunchedEffect(createdSession) {
+        createdSession?.let { session ->
+            onSessionClick(session.id, session.modelId)
+            viewModel.clearCreatedSession()
+        }
     }
     
     Scaffold(
@@ -42,10 +48,10 @@ fun SessionsScreen(
             TopAppBar(
                 title = { Text("Сессии") },
                 actions = {
-                    IconButton(onClick = onNavigateToModelSelection) {
+                    IconButton(onClick = onNavigateToSettings) {
                         Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = "Выбрать модель"
+                            imageVector = Icons.Default.Tune,
+                            contentDescription = "Настройки"
                         )
                     }
                 }
@@ -69,7 +75,6 @@ fun SessionsScreen(
         ) {
             // Selected Model Info Card
             SelectedModelCard(
-                selectedModelName = selectedModelName,
                 selectedModelId = selectedModel,
                 onNavigateToModelSelection = onNavigateToModelSelection
             )
@@ -165,7 +170,6 @@ fun SessionsScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SelectedModelCard(
-    selectedModelName: String?,
     selectedModelId: String?,
     onNavigateToModelSelection: () -> Unit
 ) {
@@ -199,7 +203,7 @@ fun SelectedModelCard(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = selectedModelName ?: selectedModelId ?: "Нажмите, чтобы выбрать модель",
+                    text = selectedModelId ?: "Нажмите, чтобы выбрать модель",
                     style = MaterialTheme.typography.titleMedium,
                     color = if (selectedModelId != null) {
                         MaterialTheme.colorScheme.onPrimaryContainer

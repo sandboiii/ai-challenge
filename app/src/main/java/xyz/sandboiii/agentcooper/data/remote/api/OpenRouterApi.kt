@@ -75,6 +75,31 @@ class OpenRouterApi @Inject constructor(
                 setBody(request)
             }
             
+            // Check response status first
+            if (response.status.value == 404) {
+                val errorBody = response.body<String>()
+                Log.e(TAG, "404 response: $errorBody")
+                try {
+                    val errorResponse = jsonParser.decodeFromString<OpenRouterResponse>(errorBody)
+                    errorResponse.error?.let { error ->
+                        if (error.message.contains("data policy", ignoreCase = true) || 
+                            error.message.contains("privacy", ignoreCase = true)) {
+                            throw IllegalStateException("This model is not compatible with your privacy settings. Please configure your privacy settings at https://openrouter.ai/settings/privacy or choose a different model.")
+                        }
+                        throw RuntimeException("API error: ${error.message}")
+                    }
+                } catch (e: IllegalStateException) {
+                    throw e
+                } catch (e: Exception) {
+                    // If error parsing fails, check raw body
+                    if (errorBody.contains("data policy", ignoreCase = true) || 
+                        errorBody.contains("privacy", ignoreCase = true)) {
+                        throw IllegalStateException("This model is not compatible with your privacy settings. Please configure your privacy settings at https://openrouter.ai/settings/privacy or choose a different model.")
+                    }
+                    throw RuntimeException("API error: $errorBody")
+                }
+            }
+            
             if (stream) {
                 // Handle SSE streaming
                 Log.d(TAG, "Starting SSE stream processing")
@@ -137,6 +162,10 @@ class OpenRouterApi @Inject constructor(
                         // Check for error first
                         jsonResponse.error?.let { error ->
                             Log.e(TAG, "API error: ${error.message}")
+                            if (error.message.contains("data policy", ignoreCase = true) || 
+                                error.message.contains("privacy", ignoreCase = true)) {
+                                throw IllegalStateException("This model is not compatible with your privacy settings. Please configure your privacy settings at https://openrouter.ai/settings/privacy or choose a different model.")
+                            }
                             throw RuntimeException("API error: ${error.message}")
                         }
                         
@@ -173,6 +202,17 @@ class OpenRouterApi @Inject constructor(
             } else {
                 // Handle non-streaming response
                 val jsonResponse = response.body<OpenRouterResponse>()
+                
+                // Check for errors first
+                jsonResponse.error?.let { error ->
+                    Log.e(TAG, "API error: ${error.message}")
+                    if (error.message.contains("data policy", ignoreCase = true) || 
+                        error.message.contains("privacy", ignoreCase = true)) {
+                        throw IllegalStateException("This model is not compatible with your privacy settings. Please configure your privacy settings at https://openrouter.ai/settings/privacy or choose a different model.")
+                    }
+                    throw RuntimeException("API error: ${error.message}")
+                }
+                
                 jsonResponse.choices?.firstOrNull()?.message?.content?.let { content ->
                     emit(content)
                 } ?: run {
@@ -185,6 +225,84 @@ class OpenRouterApi @Inject constructor(
         }
     }
     
+    override suspend fun generateTitle(
+        userMessage: String,
+        aiResponse: String,
+        model: String
+    ): String {
+        val apiKey = preferencesManager.getApiKey()
+            ?: throw IllegalStateException("API key not set. Please configure your OpenRouter API key.")
+
+        // Create a prompt asking the AI to generate a short title
+        val titlePrompt = """
+            Based on this conversation, generate a short, descriptive title (2-6 words maximum). 
+            Only return the title, nothing else.
+            
+            User: $userMessage
+            Assistant: $aiResponse
+            
+            Title:
+        """.trimIndent()
+
+        val requestMessages = listOf(
+            OpenRouterMessage(role = "user", content = titlePrompt)
+        )
+
+        val request = OpenRouterRequest(
+            model = model,
+            messages = requestMessages,
+            stream = false // Non-streaming for title generation
+        )
+
+        return try {
+            Log.d(TAG, "Generating title for conversation")
+            val response = client.post("${Constants.OPENROUTER_BASE_URL}/chat/completions") {
+                header(HttpHeaders.Authorization, "Bearer $apiKey")
+                header(HttpHeaders.ContentType, ContentType.Application.Json)
+                header("HTTP-Referer", "https://github.com/sandboiii/AgentCooper")
+                header("X-Title", "Agent Cooper")
+                setBody(request)
+            }
+
+            val jsonResponse = response.body<OpenRouterResponse>()
+            val title = jsonResponse.choices?.firstOrNull()?.message?.content
+                ?.trim()
+                ?.replace(Regex("[\"']"), "") // Remove quotes if present
+                ?.take(50) // Limit to 50 characters
+                ?: throw RuntimeException("No title generated")
+
+            Log.d(TAG, "Generated title: $title")
+            title
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to generate title", e)
+            // Fallback to generating title from user message
+            generateTitleFromMessage(userMessage)
+        }
+    }
+
+    /**
+     * Fallback method to generate a simple title from the user message
+     * if API title generation fails.
+     */
+    private fun generateTitleFromMessage(message: String): String {
+        val cleaned = message.trim().replace(Regex("\\s+"), " ")
+        val words = cleaned.split(" ")
+        val maxWords = 6
+        val maxLength = 50
+
+        val title = if (words.size <= maxWords) {
+            cleaned
+        } else {
+            words.take(maxWords).joinToString(" ")
+        }
+
+        return if (title.length > maxLength) {
+            title.take(maxLength - 3) + "..."
+        } else {
+            title
+        }
+    }
+
     override suspend fun getModels(): List<ModelDto> {
         val apiKey = preferencesManager.getApiKey() 
             ?: throw IllegalStateException("API key not set. Please configure your OpenRouter API key.")
@@ -202,20 +320,36 @@ class OpenRouterApi @Inject constructor(
             val modelsResponse = jsonParser.decodeFromString<OpenRouterModelsResponse>(responseBody)
             Log.d(TAG, "Parsed ${modelsResponse.data.size} models")
             
-            modelsResponse.data.map { modelData ->
+            // OpenRouter API automatically filters models based on your privacy settings
+            // when you're authenticated with an API key. The /models endpoint respects
+            // your privacy configuration at https://openrouter.ai/settings/privacy
+            // All models returned here should be compatible with your privacy settings.
+            val filteredModels = modelsResponse.data
+            
+            Log.d(TAG, "Retrieved ${filteredModels.size} models (filtered by OpenRouter based on privacy settings)")
+            
+            filteredModels.map { modelData ->
                 val providerName = when {
                     !modelData.top_provider?.name.isNullOrBlank() -> modelData.top_provider!!.name!!
                     !modelData.top_provider?.id.isNullOrBlank() -> modelData.top_provider!!.id!!
                     else -> "unknown"
                 }
                 
-                Log.d(TAG, "Model: ${modelData.id}, Name: ${modelData.name}, Provider: $providerName")
+                val pricingInfo = modelData.pricing?.let {
+                    PricingInfo(
+                        prompt = it.prompt,
+                        completion = it.completion
+                    )
+                }
+                
+                Log.d(TAG, "Model: ${modelData.id}, Name: ${modelData.name}, Provider: $providerName, Pricing: ${pricingInfo?.displayText ?: "unknown"}, Data Policy: ${modelData.data_policy}")
                 
                 ModelDto(
                     id = modelData.id,
                     name = modelData.name ?: modelData.id,
                     provider = providerName,
-                    description = modelData.description
+                    description = modelData.description,
+                    pricing = pricingInfo
                 )
             }
         } catch (e: Exception) {

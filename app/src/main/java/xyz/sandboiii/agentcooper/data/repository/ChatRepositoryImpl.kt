@@ -12,13 +12,15 @@ import xyz.sandboiii.agentcooper.data.remote.api.ChatMessageDto
 import xyz.sandboiii.agentcooper.domain.model.ChatMessage
 import xyz.sandboiii.agentcooper.domain.model.MessageRole
 import xyz.sandboiii.agentcooper.domain.repository.ChatRepository
+import xyz.sandboiii.agentcooper.domain.repository.SessionRepository
 import xyz.sandboiii.agentcooper.util.Constants
 
 import javax.inject.Inject
 
 class ChatRepositoryImpl @Inject constructor(
     private val chatApi: ChatApi,
-    private val database: AppDatabase
+    private val database: AppDatabase,
+    private val sessionRepository: SessionRepository
 ) : ChatRepository {
     
     companion object {
@@ -38,6 +40,13 @@ class ChatRepositoryImpl @Inject constructor(
         content: String,
         modelId: String
     ): Flow<String> = flow {
+        // Get conversation history before adding new message
+        val existingMessages = database.chatMessageDao()
+            .getMessagesBySessionSync(sessionId)
+        
+        // Check if this is the first user message (to generate title)
+        val isFirstUserMessage = existingMessages.none { it.role == MessageRole.USER }
+        
         // Save user message
         val userMessage = ChatMessageEntity(
             id = UUID.randomUUID().toString(),
@@ -48,23 +57,24 @@ class ChatRepositoryImpl @Inject constructor(
         )
         database.chatMessageDao().insertMessage(userMessage)
         
-        // Get conversation history with system prompt
-        val existingMessages = database.chatMessageDao()
-            .getMessagesBySessionSync(sessionId)
-        
         val messages = mutableListOf<ChatMessageDto>().apply {
             // Add system prompt as first message
             add(ChatMessageDto(role = "system", content = Constants.DEFAULT_SYSTEM_PROMPT))
-            // Add existing messages
+            // Add existing messages, but exclude welcome message (don't send it to AI context)
             existingMessages.forEach { msg ->
-                add(ChatMessageDto(
-                    role = when (msg.role) {
-                        MessageRole.USER -> "user"
-                        MessageRole.ASSISTANT -> "assistant"
-                        MessageRole.SYSTEM -> "system"
-                    },
-                    content = msg.content
-                ))
+                // Skip welcome message - it's just for display, not for AI context
+                if (!msg.id.startsWith("welcome-")) {
+                    add(ChatMessageDto(
+                        role = when (msg.role) {
+                            MessageRole.USER -> "user"
+                            MessageRole.ASSISTANT -> "assistant"
+                            MessageRole.SYSTEM -> "system"
+                        },
+                        content = msg.content
+                    ))
+                } else {
+                    Log.d(TAG, "Skipping welcome message from AI context: ${msg.id}")
+                }
             }
             // Add current user message
             add(ChatMessageDto(role = "user", content = content))
@@ -94,6 +104,20 @@ class ChatRepositoryImpl @Inject constructor(
             sessionId = sessionId
         )
         database.chatMessageDao().insertMessage(assistantMessage)
+        
+        // Generate title from API if this is the first user message
+        if (isFirstUserMessage && accumulatedContent.isNotEmpty()) {
+            try {
+                val generatedTitle = chatApi.generateTitle(content, accumulatedContent, modelId)
+                sessionRepository.updateSessionTitle(sessionId, generatedTitle)
+                Log.d(TAG, "Updated session title: $generatedTitle")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to generate title from API, using fallback", e)
+                // Fallback to simple title generation
+                val fallbackTitle = generateTitleFromMessage(content)
+                sessionRepository.updateSessionTitle(sessionId, fallbackTitle)
+            }
+        }
     }
     
     override suspend fun deleteMessages(sessionId: String) {
@@ -108,6 +132,33 @@ class ChatRepositoryImpl @Inject constructor(
             timestamp = timestamp,
             sessionId = sessionId
         )
+    }
+    
+    /**
+     * Generates a title from the first user message, similar to ChatGPT/Grok/DeepSeek.
+     * Takes the first few words (up to 6 words or 50 characters) and truncates if needed.
+     */
+    private fun generateTitleFromMessage(message: String): String {
+        // Remove extra whitespace and newlines
+        val cleaned = message.trim().replace(Regex("\\s+"), " ")
+        
+        // Take first 6 words or first 50 characters, whichever comes first
+        val words = cleaned.split(" ")
+        val maxWords = 6
+        val maxLength = 50
+        
+        val title = if (words.size <= maxWords) {
+            cleaned
+        } else {
+            words.take(maxWords).joinToString(" ")
+        }
+        
+        // Truncate to max length if needed and add ellipsis
+        return if (title.length > maxLength) {
+            title.take(maxLength - 3) + "..."
+        } else {
+            title
+        }
     }
 }
 

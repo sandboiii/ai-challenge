@@ -9,7 +9,8 @@ sealed class ChatState {
         val messages: List<ChatMessage>,
         val isStreaming: Boolean = false,
         val streamingContent: String = "",
-        val lastError: String? = null // Error message for the last failed message
+        val lastError: String? = null, // Error message for the last failed message
+        val isWaitingForResponse: Boolean = false // True when waiting for first chunk from API
     ) : ChatState()
     
     data class Error(

@@ -7,6 +7,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -116,12 +117,81 @@ fun ModelItem(
                 .fillMaxWidth()
                 .padding(16.dp)
         ) {
+            // Model title - now has full width
             Text(
                 text = model.name,
                 style = MaterialTheme.typography.titleMedium,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth()
             )
+            
+            // Pricing information below title
+            model.pricing?.let { pricing ->
+                Spacer(modifier = Modifier.height(6.dp))
+                Surface(
+                    shape = MaterialTheme.shapes.small,
+                    color = if (pricing.isFree) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.secondaryContainer
+                    }
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        if (pricing.isFree) {
+                            Text(
+                                text = pricing.displayText,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        } else {
+                            // For paid models, show two lines: input and output pricing
+                            if (pricing.prompt != null && pricing.completion != null) {
+                                // First line: input pricing
+                                Text(
+                                    text = "${pricing.prompt} вход (ваш запрос)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                                // Second line: output pricing
+                                Text(
+                                    text = "${pricing.completion} выход (ответ модели)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                            } else if (pricing.prompt != null) {
+                                Text(
+                                    text = "${pricing.prompt} вход (ваш запрос)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                            } else if (pricing.completion != null) {
+                                Text(
+                                    text = "${pricing.completion} выход (ответ модели)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                            } else {
+                                Text(
+                                    text = pricing.displayText,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = model.provider,

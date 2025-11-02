@@ -26,6 +26,7 @@ data class Delta(
 @Serializable
 data class Error(
     val message: String,
-    val type: String? = null
+    val type: String? = null,
+    val code: Int? = null
 )
 

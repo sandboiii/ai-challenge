@@ -34,6 +34,9 @@ class SessionsViewModel @Inject constructor(
     private val _selectedModelName = MutableStateFlow<String?>(null)
     val selectedModelName: StateFlow<String?> = _selectedModelName.asStateFlow()
     
+    private val _createdSession = MutableStateFlow<xyz.sandboiii.agentcooper.domain.model.ChatSession?>(null)
+    val createdSession: StateFlow<xyz.sandboiii.agentcooper.domain.model.ChatSession?> = _createdSession.asStateFlow()
+    
     private var cachedModels: List<xyz.sandboiii.agentcooper.data.remote.api.ModelDto> = emptyList()
     
     val selectedModel = preferencesManager.selectedModel
@@ -87,7 +90,8 @@ class SessionsViewModel @Inject constructor(
             try {
                 val modelId = preferencesManager.selectedModel.first() 
                     ?: throw IllegalStateException("No model selected")
-                createSessionUseCase(modelId)
+                val newSession = createSessionUseCase(modelId)
+                _createdSession.value = newSession // Emit the created session
                 loadSessions()
             } catch (e: Exception) {
                 _state.value = SessionsState.Error(
@@ -95,6 +99,10 @@ class SessionsViewModel @Inject constructor(
                 )
             }
         }
+    }
+    
+    fun clearCreatedSession() {
+        _createdSession.value = null
     }
     
     fun deleteSession(sessionId: String) {

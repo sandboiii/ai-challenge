@@ -14,6 +14,10 @@ class SessionRepositoryImpl @Inject constructor(
     private val database: AppDatabase
 ) : SessionRepository {
     
+    companion object {
+        private const val TAG = "SessionRepositoryImpl"
+    }
+    
     override fun getAllSessions(): Flow<List<ChatSession>> {
         return database.sessionDao()
             .getAllSessions()
@@ -36,11 +40,31 @@ class SessionRepositoryImpl @Inject constructor(
             modelId = modelId
         )
         database.sessionDao().insertSession(session)
+        
+        // Create welcome message in the database
+        val welcomeMessage = xyz.sandboiii.agentcooper.data.local.entity.ChatMessageEntity(
+            id = "welcome-${session.id}",
+            content = xyz.sandboiii.agentcooper.util.Constants.WELCOME_MESSAGE,
+            role = xyz.sandboiii.agentcooper.domain.model.MessageRole.ASSISTANT,
+            timestamp = System.currentTimeMillis(),
+            sessionId = session.id
+        )
+        database.chatMessageDao().insertMessage(welcomeMessage)
+        android.util.Log.d(TAG, "Created welcome message for session: ${session.id}")
+        
         return session.toDomain()
     }
     
     override suspend fun updateSession(session: ChatSession) {
         database.sessionDao().updateSession(session.toEntity())
+    }
+    
+    override suspend fun updateSessionTitle(sessionId: String, title: String) {
+        val session = database.sessionDao().getSessionById(sessionId)
+        if (session != null) {
+            val updatedSession = session.copy(title = title)
+            database.sessionDao().updateSession(updatedSession)
+        }
     }
     
     override suspend fun deleteSession(sessionId: String) {

@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets
 import xyz.sandboiii.agentcooper.presentation.chat.ChatScreen
 import xyz.sandboiii.agentcooper.presentation.model_selection.ModelSelectionScreen
 import xyz.sandboiii.agentcooper.presentation.sessions.SessionsScreen
+import xyz.sandboiii.agentcooper.presentation.settings.SettingsScreen
 
 sealed class Screen(val route: String) {
     data object Sessions : Screen("sessions")
@@ -27,6 +28,7 @@ sealed class Screen(val route: String) {
         }
     }
     data object ModelSelection : Screen("model_selection")
+    data object Settings : Screen("settings")
 }
 
 @Composable
@@ -45,6 +47,9 @@ fun NavGraph(
                 },
                 onNavigateToModelSelection = {
                     navController.navigate(Screen.ModelSelection.route)
+                },
+                onNavigateToSettings = {
+                    navController.navigate(Screen.Settings.route)
                 }
             )
         }
@@ -73,6 +78,14 @@ fun NavGraph(
         composable(Screen.ModelSelection.route) {
             ModelSelectionScreen(
                 onModelSelected = {
+                    navController.popBackStack()
+                }
+            )
+        }
+        
+        composable(Screen.Settings.route) {
+            SettingsScreen(
+                onNavigateBack = {
                     navController.popBackStack()
                 }
             )

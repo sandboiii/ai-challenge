@@ -14,7 +14,15 @@ data class ModelData(
     val description: String? = null,
     val context_length: Int? = null,
     val architecture: Architecture? = null,
-    val top_provider: Provider? = null
+    val top_provider: Provider? = null,
+    val pricing: Pricing? = null,
+    val moderation: Boolean? = null,
+    val context_length_display: String? = null,
+    val supports_streaming: Boolean? = null,
+    val supports_system_prompt: Boolean? = null,
+    val supports_functions: Boolean? = null,
+    val supports_native_functions: Boolean? = null,
+    val data_policy: String? = null // Privacy/data policy indicator
 )
 
 @Serializable
@@ -27,5 +35,11 @@ data class Architecture(
 data class Provider(
     val id: String? = null,
     val name: String? = null
+)
+
+@Serializable
+data class Pricing(
+    val prompt: String? = null,
+    val completion: String? = null
 )
 

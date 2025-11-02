@@ -8,6 +8,7 @@ interface SessionRepository {
     suspend fun getSessionById(sessionId: String): ChatSession?
     suspend fun createSession(modelId: String): ChatSession
     suspend fun updateSession(session: ChatSession)
+    suspend fun updateSessionTitle(sessionId: String, title: String)
     suspend fun deleteSession(sessionId: String)
 }
 
