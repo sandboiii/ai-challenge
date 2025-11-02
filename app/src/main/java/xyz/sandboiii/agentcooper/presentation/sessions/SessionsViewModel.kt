@@ -7,10 +7,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import xyz.sandboiii.agentcooper.data.remote.api.ChatApi
 import xyz.sandboiii.agentcooper.domain.usecase.CreateSessionUseCase
 import xyz.sandboiii.agentcooper.domain.usecase.DeleteSessionUseCase
 import xyz.sandboiii.agentcooper.domain.usecase.GetSessionsUseCase
@@ -22,14 +24,49 @@ class SessionsViewModel @Inject constructor(
     private val getSessionsUseCase: GetSessionsUseCase,
     private val createSessionUseCase: CreateSessionUseCase,
     private val deleteSessionUseCase: DeleteSessionUseCase,
-    private val preferencesManager: PreferencesManager
+    private val preferencesManager: PreferencesManager,
+    private val chatApi: ChatApi
 ) : ViewModel() {
     
     private val _state = MutableStateFlow<SessionsState>(SessionsState.Loading)
     val state: StateFlow<SessionsState> = _state.asStateFlow()
     
+    private val _selectedModelName = MutableStateFlow<String?>(null)
+    val selectedModelName: StateFlow<String?> = _selectedModelName.asStateFlow()
+    
+    private var cachedModels: List<xyz.sandboiii.agentcooper.data.remote.api.ModelDto> = emptyList()
+    
+    val selectedModel = preferencesManager.selectedModel
+    
     init {
         loadSessions()
+        loadSelectedModelName()
+    }
+    
+    private fun loadSelectedModelName() {
+        viewModelScope.launch {
+            preferencesManager.selectedModel.collect { modelId ->
+                if (modelId != null) {
+                    // Try to find in cached models first
+                    val model = cachedModels.find { it.id == modelId }
+                    if (model != null) {
+                        _selectedModelName.value = model.name
+                    } else {
+                        // If not cached, fetch models and update cache
+                        try {
+                            cachedModels = chatApi.getModels()
+                            val foundModel = cachedModels.find { it.id == modelId }
+                            _selectedModelName.value = foundModel?.name ?: modelId
+                        } catch (e: Exception) {
+                            // If fetch fails, use modelId as fallback
+                            _selectedModelName.value = modelId
+                        }
+                    }
+                } else {
+                    _selectedModelName.value = null
+                }
+            }
+        }
     }
     
     fun loadSessions() {
@@ -73,7 +110,22 @@ class SessionsViewModel @Inject constructor(
         }
     }
     
-    val selectedModel = preferencesManager.selectedModel
+    fun refreshSelectedModelName() {
+        viewModelScope.launch {
+            val modelId = preferencesManager.selectedModel.first()
+            if (modelId != null) {
+                try {
+                    cachedModels = chatApi.getModels()
+                    val model = cachedModels.find { it.id == modelId }
+                    _selectedModelName.value = model?.name ?: modelId
+                } catch (e: Exception) {
+                    _selectedModelName.value = modelId
+                }
+            } else {
+                _selectedModelName.value = null
+            }
+        }
+    }
 }
 
 sealed class SessionsState {

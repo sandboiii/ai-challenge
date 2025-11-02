@@ -25,7 +25,7 @@ data class Architecture(
 
 @Serializable
 data class Provider(
-    val id: String,
-    val name: String
+    val id: String? = null,
+    val name: String? = null
 )
 

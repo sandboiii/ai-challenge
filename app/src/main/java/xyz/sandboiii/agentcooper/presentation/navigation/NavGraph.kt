@@ -4,8 +4,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.navArgument
+import java.net.URLDecoder
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import xyz.sandboiii.agentcooper.presentation.chat.ChatScreen
 import xyz.sandboiii.agentcooper.presentation.model_selection.ModelSelectionScreen
 import xyz.sandboiii.agentcooper.presentation.sessions.SessionsScreen
@@ -14,7 +19,11 @@ sealed class Screen(val route: String) {
     data object Sessions : Screen("sessions")
     data class Chat(val sessionId: String, val modelId: String) : Screen("chat/{sessionId}/{modelId}") {
         companion object {
-            fun createRoute(sessionId: String, modelId: String) = "chat/$sessionId/$modelId"
+            fun createRoute(sessionId: String, modelId: String): String {
+                val encodedSessionId = URLEncoder.encode(sessionId, StandardCharsets.UTF_8.toString())
+                val encodedModelId = URLEncoder.encode(modelId, StandardCharsets.UTF_8.toString())
+                return "chat/$encodedSessionId/$encodedModelId"
+            }
         }
     }
     data object ModelSelection : Screen("model_selection")
@@ -32,7 +41,7 @@ fun NavGraph(
         composable(Screen.Sessions.route) {
             SessionsScreen(
                 onSessionClick = { sessionId, modelId ->
-                    navController.navigate("chat/$sessionId/$modelId")
+                    navController.navigate(Screen.Chat.createRoute(sessionId, modelId))
                 },
                 onNavigateToModelSelection = {
                     navController.navigate(Screen.ModelSelection.route)
@@ -40,9 +49,19 @@ fun NavGraph(
             )
         }
         
-        composable("chat/{sessionId}/{modelId}") { backStackEntry ->
-            val sessionId = backStackEntry.arguments?.getString("sessionId") ?: return@composable
-            val modelId = backStackEntry.arguments?.getString("modelId") ?: return@composable
+        composable(
+            route = "chat/{sessionId}/{modelId}",
+            arguments = listOf(
+                navArgument("sessionId") { type = NavType.StringType },
+                navArgument("modelId") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val encodedSessionId = backStackEntry.arguments?.getString("sessionId") ?: return@composable
+            val encodedModelId = backStackEntry.arguments?.getString("modelId") ?: return@composable
+            
+            // Decode URL-encoded parameters
+            val sessionId = URLDecoder.decode(encodedSessionId, StandardCharsets.UTF_8.toString())
+            val modelId = URLDecoder.decode(encodedModelId, StandardCharsets.UTF_8.toString())
             
             ChatScreen(
                 sessionId = sessionId,

@@ -1,5 +1,6 @@
 package xyz.sandboiii.agentcooper.data.repository
 
+import android.util.Log
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
@@ -19,6 +20,10 @@ class ChatRepositoryImpl @Inject constructor(
     private val chatApi: ChatApi,
     private val database: AppDatabase
 ) : ChatRepository {
+    
+    companion object {
+        private const val TAG = "ChatRepositoryImpl"
+    }
     
     override fun getMessages(sessionId: String): Flow<List<ChatMessage>> {
         return database.chatMessageDao()
@@ -70,9 +75,14 @@ class ChatRepositoryImpl @Inject constructor(
         var accumulatedContent = ""
         
         // Stream response from API
-        chatApi.sendMessage(messages, modelId, stream = true).collect { chunk ->
-            accumulatedContent += chunk
-            emit(chunk)
+        try {
+            chatApi.sendMessage(messages, modelId, stream = true).collect { chunk ->
+                accumulatedContent += chunk
+                emit(chunk)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error streaming message", e)
+            throw e
         }
         
         // Save complete assistant message

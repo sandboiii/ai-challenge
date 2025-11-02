@@ -1,5 +1,6 @@
 package xyz.sandboiii.agentcooper.presentation.model_selection
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -18,6 +19,10 @@ class ModelSelectionViewModel @Inject constructor(
     private val preferencesManager: PreferencesManager
 ) : ViewModel() {
     
+    companion object {
+        private const val TAG = "ModelSelectionViewModel"
+    }
+    
     private val _state = MutableStateFlow<ModelSelectionState>(ModelSelectionState.Loading)
     val state: StateFlow<ModelSelectionState> = _state.asStateFlow()
     
@@ -31,7 +36,9 @@ class ModelSelectionViewModel @Inject constructor(
         viewModelScope.launch {
             _state.value = ModelSelectionState.Loading
             try {
+                Log.d(TAG, "Loading models...")
                 val models = chatApi.getModels()
+                Log.d(TAG, "Received ${models.size} models from API")
                 val domainModels = models.map { dto ->
                     AIModel(
                         id = dto.id,
@@ -40,8 +47,13 @@ class ModelSelectionViewModel @Inject constructor(
                         description = dto.description
                     )
                 }
+                Log.d(TAG, "Successfully loaded ${domainModels.size} models")
                 _state.value = ModelSelectionState.Success(models = domainModels)
             } catch (e: Exception) {
+                Log.e(TAG, "Failed to load models", e)
+                Log.e(TAG, "Error message: ${e.message}")
+                Log.e(TAG, "Error cause: ${e.cause?.message}")
+                Log.e(TAG, "Error stack trace: ${e.stackTraceToString()}")
                 _state.value = ModelSelectionState.Error(
                     message = e.message ?: "Failed to load models"
                 )

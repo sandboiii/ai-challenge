@@ -30,6 +30,11 @@ fun SessionsScreen(
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val state by viewModel.state.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = SessionsState.Loading)
     val selectedModel by viewModel.selectedModel.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = null)
+    val selectedModelName by viewModel.selectedModelName.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = null)
+    
+    LaunchedEffect(Unit) {
+        viewModel.refreshSelectedModelName()
+    }
     
     Scaffold(
         topBar = {
@@ -57,50 +62,36 @@ fun SessionsScreen(
             }
         }
     ) { padding ->
-        when (val currentState = state) {
-            is SessionsState.Loading -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator()
-                }
-            }
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            // Selected Model Info Card
+            SelectedModelCard(
+                selectedModelName = selectedModelName,
+                selectedModelId = selectedModel,
+                onNavigateToModelSelection = onNavigateToModelSelection
+            )
             
-            is SessionsState.Error -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        Text(
-                            text = "Ошибка",
-                            style = MaterialTheme.typography.headlineSmall
-                        )
-                        Text(
-                            text = currentState.message,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Button(onClick = { viewModel.loadSessions() }) {
-                            Text("Повторить")
-                        }
-                    }
-                }
-            }
-            
-            is SessionsState.Success -> {
-                if (currentState.sessions.isEmpty()) {
+            // Sessions List
+            when (val currentState = state) {
+                is SessionsState.Loading -> {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(padding),
+                            .weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                }
+                
+                is SessionsState.Error -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .weight(1f),
                         contentAlignment = Alignment.Center
                     ) {
                         Column(
@@ -108,37 +99,124 @@ fun SessionsScreen(
                             verticalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
                             Text(
-                                text = "Нет сессий",
+                                text = "Ошибка",
                                 style = MaterialTheme.typography.headlineSmall
                             )
                             Text(
-                                text = "Создайте новую сессию для начала разговора",
+                                text = currentState.message,
                                 style = MaterialTheme.typography.bodyMedium
                             )
+                            Button(onClick = { viewModel.loadSessions() }) {
+                                Text("Повторить")
+                            }
                         }
                     }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(padding),
-                        contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                    @OptIn(ExperimentalMaterial3Api::class)
-                    items(
-                        items = currentState.sessions,
-                        key = { it.id }
-                    ) { session ->
-                            SessionItem(
-                                session = session,
-                                onClick = { onSessionClick(session.id, session.modelId) },
-                                onDelete = { viewModel.deleteSession(session.id) }
-                            )
+                }
+                
+                is SessionsState.Success -> {
+                    if (currentState.sessions.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .weight(1f),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                Text(
+                                    text = "Нет сессий",
+                                    style = MaterialTheme.typography.headlineSmall
+                                )
+                                Text(
+                                    text = "Создайте новую сессию для начала разговора",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .weight(1f),
+                            contentPadding = PaddingValues(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            @OptIn(ExperimentalMaterial3Api::class)
+                            items(
+                                items = currentState.sessions,
+                                key = { it.id }
+                            ) { session ->
+                                SessionItem(
+                                    session = session,
+                                    onClick = { onSessionClick(session.id, session.modelId) },
+                                    onDelete = { viewModel.deleteSession(session.id) }
+                                )
+                            }
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SelectedModelCard(
+    selectedModelName: String?,
+    selectedModelId: String?,
+    onNavigateToModelSelection: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        onClick = onNavigateToModelSelection,
+        colors = CardDefaults.cardColors(
+            containerColor = if (selectedModelId != null) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceVariant
+            }
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = if (selectedModelId != null) "Выбранная модель" else "Модель не выбрана",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = selectedModelName ?: selectedModelId ?: "Нажмите, чтобы выбрать модель",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (selectedModelId != null) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    }
+                )
+            }
+            Icon(
+                imageVector = Icons.Default.Settings,
+                contentDescription = "Выбрать модель",
+                tint = if (selectedModelId != null) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                }
+            )
         }
     }
 }

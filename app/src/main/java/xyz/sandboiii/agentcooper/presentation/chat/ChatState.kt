@@ -8,7 +8,8 @@ sealed class ChatState {
     data class Success(
         val messages: List<ChatMessage>,
         val isStreaming: Boolean = false,
-        val streamingContent: String = ""
+        val streamingContent: String = "",
+        val lastError: String? = null // Error message for the last failed message
     ) : ChatState()
     
     data class Error(

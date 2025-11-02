@@ -9,18 +9,34 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.foundation.isSystemInDarkTheme
 import xyz.sandboiii.agentcooper.domain.model.MessageRole
 
 @Composable
@@ -44,7 +60,22 @@ fun ChatScreen(
         if (state is ChatState.Success) {
             val messages = (state as ChatState.Success).messages
             if (messages.isNotEmpty()) {
+                kotlinx.coroutines.delay(100) // Small delay to ensure layout is ready
                 listState.animateScrollToItem(messages.size - 1)
+            }
+        }
+    }
+    
+    // Scroll to bottom when keyboard appears or message text changes
+    LaunchedEffect(messageText) {
+        if (messageText.isNotEmpty()) {
+            val currentState = state
+            if (currentState is ChatState.Success) {
+                val messages = currentState.messages
+                if (messages.isNotEmpty()) {
+                    kotlinx.coroutines.delay(100)
+                    listState.animateScrollToItem(messages.size - 1)
+                }
             }
         }
     }
@@ -113,7 +144,10 @@ fun ChatScreen(
                             .weight(1f)
                             .fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
-                        contentPadding = PaddingValues(vertical = 16.dp)
+                        contentPadding = PaddingValues(
+                            top = 16.dp,
+                            bottom = 16.dp // Extra padding at bottom to keep messages visible above input
+                        )
                     ) {
                         items(currentState.messages) { message ->
                             MessageBubble(
@@ -121,6 +155,17 @@ fun ChatScreen(
                                 isStreaming = currentState.isStreaming && 
                                         message.id == "streaming"
                             )
+                        }
+                        
+                        // Error indicator for last message
+                        if (currentState.lastError != null) {
+                            item {
+                                ErrorIndicator(
+                                    errorMessage = currentState.lastError!!,
+                                    onRetry = { viewModel.handleIntent(ChatIntent.RetryLastMessage) },
+                                    onDismiss = { viewModel.handleIntent(ChatIntent.ClearError) }
+                                )
+                            }
                         }
                         
                         // Typing indicator
@@ -183,7 +228,9 @@ fun MessageBubble(
                     .widthIn(max = 280.dp)
                     .clip(RoundedCornerShape(16.dp)),
                 color = if (isUser) {
-                    MaterialTheme.colorScheme.primary
+                    // Use a darker, more contrasting color for user messages
+                    // This ensures white text is always visible
+                    Color(0xFF6200EE) // Material Design Purple 700
                 } else {
                     MaterialTheme.colorScheme.surfaceVariant
                 },
@@ -194,11 +241,73 @@ fun MessageBubble(
                     modifier = Modifier.padding(12.dp),
                     style = MaterialTheme.typography.bodyMedium,
                     color = if (isUser) {
-                        MaterialTheme.colorScheme.onPrimary
+                        // Always use white on user message bubbles for maximum contrast
+                        Color.White
                     } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
+                        // Use onSurface for better contrast on surfaceVariant
+                        MaterialTheme.colorScheme.onSurface
                     }
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun ErrorIndicator(
+    errorMessage: String,
+    onRetry: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Surface(
+            modifier = Modifier
+                .widthIn(max = 280.dp)
+                .clip(RoundedCornerShape(12.dp)),
+            color = MaterialTheme.colorScheme.errorContainer,
+            tonalElevation = 1.dp
+        ) {
+            Row(
+                modifier = Modifier.padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = errorMessage,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+                
+                IconButton(
+                    onClick = onRetry,
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Повторить",
+                        tint = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Закрыть",
+                        tint = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
         }
     }
@@ -211,6 +320,28 @@ fun MessageInput(
     onSend: () -> Unit,
     enabled: Boolean
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    val focusRequester = remember { FocusRequester() }
+    
+    val isDarkTheme = isSystemInDarkTheme()
+    
+    // Use Material Design colors for borders, but ensure visibility
+    val unfocusedBorderColor = MaterialTheme.colorScheme.outline
+    // Use a darker, more visible color for focused state
+    val focusedBorderColor = if (isDarkTheme) {
+        Color(0xFF90CAF9) // Light blue for dark theme
+    } else {
+        Color(0xFF1976D2) // Material Blue 700 - clearly visible on light background
+    }
+    
+    // Cursor color - use a dark, contrasting color that stands out
+    val cursorColor = if (isDarkTheme) {
+        Color(0xFF90CAF9) // Light blue for dark theme
+    } else {
+        Color(0xFF1976D2) // Material Blue 700 - clearly visible and distinct from placeholder
+    }
+    
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -218,16 +349,57 @@ fun MessageInput(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.Bottom
     ) {
-        OutlinedTextField(
-            value = text,
-            onValueChange = onTextChange,
-            modifier = Modifier.weight(1f),
-            enabled = enabled,
-            placeholder = { Text("Напишите сообщение...") },
-            shape = RoundedCornerShape(24.dp),
-            singleLine = false,
-            maxLines = 4
-        )
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .heightIn(min = 56.dp) // Match OutlinedTextField default height
+                .border(
+                    width = 1.dp, // Standard Material Design border width
+                    color = if (isFocused) {
+                        focusedBorderColor
+                    } else {
+                        unfocusedBorderColor
+                    },
+                    shape = RoundedCornerShape(24.dp)
+                )
+        ) {
+            BasicTextField(
+                value = text,
+                onValueChange = onTextChange,
+                enabled = enabled,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focusRequester)
+                    .padding(horizontal = 16.dp, vertical = 16.dp), // Increased padding to match OutlinedTextField
+                textStyle = TextStyle(
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = MaterialTheme.typography.bodyMedium.fontSize,
+                    lineHeight = MaterialTheme.typography.bodyMedium.lineHeight
+                ),
+                cursorBrush = SolidColor(cursorColor), // Ensure cursor is visible
+                singleLine = false,
+                maxLines = 4,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { onSend() }),
+                interactionSource = interactionSource,
+                decorationBox = { innerTextField ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp) // Additional vertical padding for text alignment
+                    ) {
+                        if (text.isEmpty()) {
+                            Text(
+                                text = "Напишите сообщение...",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f) // Lighter placeholder to distinguish from cursor
+                            )
+                        }
+                        innerTextField()
+                    }
+                }
+            )
+        }
         
         FloatingActionButton(
             onClick = onSend,
