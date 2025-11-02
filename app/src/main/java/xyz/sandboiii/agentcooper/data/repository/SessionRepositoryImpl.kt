@@ -71,6 +71,10 @@ class SessionRepositoryImpl @Inject constructor(
         database.sessionDao().deleteSession(sessionId)
     }
     
+    override suspend fun deleteAllSessions() {
+        database.sessionDao().deleteAllSessions()
+    }
+    
     private fun SessionEntity.toDomain(): ChatSession {
         return ChatSession(
             id = id,

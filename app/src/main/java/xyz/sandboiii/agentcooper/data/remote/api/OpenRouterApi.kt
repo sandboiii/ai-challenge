@@ -324,11 +324,25 @@ class OpenRouterApi @Inject constructor(
             // when you're authenticated with an API key. The /models endpoint respects
             // your privacy configuration at https://openrouter.ai/settings/privacy
             // All models returned here should be compatible with your privacy settings.
-            val filteredModels = modelsResponse.data
+            val privacyFilteredModels = modelsResponse.data
             
-            Log.d(TAG, "Retrieved ${filteredModels.size} models (filtered by OpenRouter based on privacy settings)")
+            // Filter to only exclude image and audio generation models
+            // Keep all text models, including those that might be good for coding or general chat
+            val chatOnlyModels = privacyFilteredModels.filter { modelData ->
+                val modality = modelData.architecture?.modality?.lowercase()
+                
+                // Only exclude image/audio models based on modality
+                // Include everything else (text models, null modality, etc.)
+                when (modality) {
+                    "image", "audio" -> false
+                    else -> true // Include text, null, or any other modality
+                }
+            }
             
-            filteredModels.map { modelData ->
+            Log.d(TAG, "Retrieved ${privacyFilteredModels.size} models (filtered by OpenRouter based on privacy settings)")
+            Log.d(TAG, "Filtered to ${chatOnlyModels.size} chat-only models (excluded image/audio models)")
+            
+            chatOnlyModels.map { modelData ->
                 val providerName = when {
                     !modelData.top_provider?.name.isNullOrBlank() -> modelData.top_provider!!.name!!
                     !modelData.top_provider?.id.isNullOrBlank() -> modelData.top_provider!!.id!!

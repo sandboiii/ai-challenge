@@ -11,5 +11,6 @@ interface ChatRepository {
         modelId: String
     ): Flow<String>
     suspend fun deleteMessages(sessionId: String)
+    suspend fun deleteAllMessages()
 }
 

@@ -53,5 +53,14 @@ object UseCaseModule {
     ): DeleteSessionUseCase {
         return DeleteSessionUseCase(sessionRepository, chatRepository)
     }
+    
+    @Provides
+    @Singleton
+    fun provideDeleteAllSessionsUseCase(
+        sessionRepository: SessionRepository,
+        chatRepository: ChatRepository
+    ): xyz.sandboiii.agentcooper.domain.usecase.DeleteAllSessionsUseCase {
+        return xyz.sandboiii.agentcooper.domain.usecase.DeleteAllSessionsUseCase(sessionRepository, chatRepository)
+    }
 }
 

@@ -5,6 +5,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
@@ -33,6 +34,10 @@ fun SettingsScreen(
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
     val saveSuccess by viewModel.saveSuccess.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = null)
+    val isDeletingSessions by viewModel.isDeletingSessions.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
+    val deleteSessionsSuccess by viewModel.deleteSessionsSuccess.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
+    
+    var showDeleteConfirmation by remember { mutableStateOf(false) }
     
     var localApiKey by remember { mutableStateOf(apiKey) }
     var passwordVisible by remember { mutableStateOf(false) }
@@ -48,6 +53,14 @@ fun SettingsScreen(
         if (saveSuccess) {
             kotlinx.coroutines.delay(2000)
             viewModel.clearSaveSuccess()
+        }
+    }
+    
+    // Clear delete success message after showing it
+    LaunchedEffect(deleteSessionsSuccess) {
+        if (deleteSessionsSuccess) {
+            kotlinx.coroutines.delay(2000)
+            viewModel.clearDeleteSessionsSuccess()
         }
     }
     
@@ -172,7 +185,92 @@ fun SettingsScreen(
                     }
                 }
             }
+            
+            // Delete All Sessions Section
+            Card(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "Управление данными",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    
+                    Text(
+                        text = "Удалить все сохранённые сессии чата. Это действие нельзя отменить.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    
+                    if (deleteSessionsSuccess) {
+                        Text(
+                            text = "Все сессии успешно удалены",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    
+                    Button(
+                        onClick = { showDeleteConfirmation = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isDeletingSessions,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                            contentColor = Color.White,
+                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    ) {
+                        if (isDeletingSessions) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = Color.White
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                "Удалить все сессии",
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
+            }
         }
+    }
+    
+    // Confirmation dialog
+    if (showDeleteConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmation = false },
+            title = { Text("Удалить все сессии?") },
+            text = { Text("Это действие удалит все сохранённые сессии чата и не может быть отменено.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirmation = false
+                        viewModel.deleteAllSessions()
+                    }
+                ) {
+                    Text("Удалить", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmation = false }) {
+                    Text("Отмена")
+                }
+            }
+        )
     }
 }
 

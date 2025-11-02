@@ -7,12 +7,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import xyz.sandboiii.agentcooper.domain.usecase.DeleteAllSessionsUseCase
 import xyz.sandboiii.agentcooper.util.PreferencesManager
 import javax.inject.Inject
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
-    private val preferencesManager: PreferencesManager
+    private val preferencesManager: PreferencesManager,
+    private val deleteAllSessionsUseCase: DeleteAllSessionsUseCase
 ) : ViewModel() {
     
     private val _apiKey = MutableStateFlow<String>("")
@@ -26,6 +28,12 @@ class SettingsViewModel @Inject constructor(
     
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
+    
+    private val _isDeletingSessions = MutableStateFlow(false)
+    val isDeletingSessions: StateFlow<Boolean> = _isDeletingSessions.asStateFlow()
+    
+    private val _deleteSessionsSuccess = MutableStateFlow(false)
+    val deleteSessionsSuccess: StateFlow<Boolean> = _deleteSessionsSuccess.asStateFlow()
     
     init {
         loadApiKey()
@@ -78,6 +86,27 @@ class SettingsViewModel @Inject constructor(
     
     fun clearError() {
         _errorMessage.value = null
+    }
+    
+    fun deleteAllSessions() {
+        viewModelScope.launch {
+            _isDeletingSessions.value = true
+            _errorMessage.value = null
+            _deleteSessionsSuccess.value = false
+            
+            try {
+                deleteAllSessionsUseCase()
+                _deleteSessionsSuccess.value = true
+            } catch (e: Exception) {
+                _errorMessage.value = "Ошибка удаления сессий: ${e.message}"
+            } finally {
+                _isDeletingSessions.value = false
+            }
+        }
+    }
+    
+    fun clearDeleteSessionsSuccess() {
+        _deleteSessionsSuccess.value = false
     }
 }
 

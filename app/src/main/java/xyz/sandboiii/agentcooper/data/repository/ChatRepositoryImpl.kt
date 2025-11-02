@@ -124,6 +124,10 @@ class ChatRepositoryImpl @Inject constructor(
         database.chatMessageDao().deleteMessagesBySession(sessionId)
     }
     
+    override suspend fun deleteAllMessages() {
+        database.chatMessageDao().deleteAllMessages()
+    }
+    
     private fun ChatMessageEntity.toDomain(): ChatMessage {
         return ChatMessage(
             id = id,

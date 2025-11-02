@@ -10,5 +10,6 @@ interface SessionRepository {
     suspend fun updateSession(session: ChatSession)
     suspend fun updateSessionTitle(sessionId: String, title: String)
     suspend fun deleteSession(sessionId: String)
+    suspend fun deleteAllSessions()
 }
 
