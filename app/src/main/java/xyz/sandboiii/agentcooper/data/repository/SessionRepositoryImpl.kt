@@ -8,7 +8,9 @@ import xyz.sandboiii.agentcooper.data.local.entity.SessionEntity
 import xyz.sandboiii.agentcooper.domain.model.ChatSession
 import xyz.sandboiii.agentcooper.domain.repository.SessionRepository
 
-class SessionRepositoryImpl(
+import javax.inject.Inject
+
+class SessionRepositoryImpl @Inject constructor(
     private val database: AppDatabase
 ) : SessionRepository {
     

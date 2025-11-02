@@ -17,6 +17,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -26,11 +27,13 @@ fun SessionsScreen(
     onNavigateToModelSelection: () -> Unit = {},
     viewModel: SessionsViewModel = hiltViewModel()
 ) {
-    val state by viewModel.state.collectAsStateWithLifecycle()
-    val selectedModel by viewModel.selectedModel.collectAsStateWithLifecycle()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val state by viewModel.state.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = SessionsState.Loading)
+    val selectedModel by viewModel.selectedModel.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = null)
     
     Scaffold(
         topBar = {
+            @OptIn(ExperimentalMaterial3Api::class)
             TopAppBar(
                 title = { Text("Сессии") },
                 actions = {
@@ -122,10 +125,11 @@ fun SessionsScreen(
                         contentPadding = PaddingValues(16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(
-                            items = currentState.sessions,
-                            key = { it.id }
-                        ) { session ->
+                    @OptIn(ExperimentalMaterial3Api::class)
+                    items(
+                        items = currentState.sessions,
+                        key = { it.id }
+                    ) { session ->
                             SessionItem(
                                 session = session,
                                 onClick = { onSessionClick(session.id, session.modelId) },
@@ -139,6 +143,7 @@ fun SessionsScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SessionItem(
     session: xyz.sandboiii.agentcooper.domain.model.ChatSession,

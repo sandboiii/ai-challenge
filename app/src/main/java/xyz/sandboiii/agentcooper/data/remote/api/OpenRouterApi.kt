@@ -62,34 +62,24 @@ class OpenRouterApi @Inject constructor(
             
             if (stream) {
                 // Handle SSE streaming
-                response.bodyAsChannel().let { channel ->
-                    var buffer = ""
-                    while (!channel.isClosedForRead) {
-                        val bytePacket = channel.readRemaining(8192)
-                        val chunk = bytePacket.readText()
-                        buffer += chunk
+                val body = response.body<String>()
+                val lines = body.lines()
+                
+                for (line in lines) {
+                    if (line.startsWith("data: ")) {
+                        val data = line.removePrefix("data: ").trim()
+                        if (data == "[DONE]") {
+                            break
+                        }
                         
-                        val lines = buffer.split("\n")
-                        // Keep the last incomplete line in buffer
-                        buffer = lines.lastOrNull() ?: ""
-                        
-                        for (line in lines.dropLast(1)) {
-                            if (line.startsWith("data: ")) {
-                                val data = line.removePrefix("data: ").trim()
-                                if (data == "[DONE]") {
-                                    return@let
+                        if (data.isNotEmpty()) {
+                            try {
+                                val jsonResponse = Json.decodeFromString<OpenRouterResponse>(data)
+                                jsonResponse.choices?.firstOrNull()?.delta?.content?.let { content ->
+                                    emit(content)
                                 }
-                                
-                                if (data.isNotEmpty()) {
-                                    try {
-                                        val jsonResponse = Json.decodeFromString<OpenRouterResponse>(data)
-                                        jsonResponse.choices?.firstOrNull()?.delta?.content?.let { content ->
-                                            emit(content)
-                                        }
-                                    } catch (e: Exception) {
-                                        // Skip invalid JSON lines
-                                    }
-                                }
+                            } catch (e: Exception) {
+                                // Skip invalid JSON lines
                             }
                         }
                     }
@@ -120,7 +110,7 @@ class OpenRouterApi @Inject constructor(
                 ModelDto(
                     id = modelData.id,
                     name = modelData.name ?: modelData.id,
-                    provider = modelData.top_provider?.name ?: "unknown",
+                    provider = modelData.top_provider?.name ?: modelData.top_provider?.id ?: "unknown",
                     description = modelData.description
                 )
             }

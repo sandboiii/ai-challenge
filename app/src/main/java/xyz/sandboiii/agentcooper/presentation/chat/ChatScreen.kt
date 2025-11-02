@@ -20,6 +20,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import xyz.sandboiii.agentcooper.domain.model.MessageRole
 
 @Composable
@@ -33,7 +34,8 @@ fun ChatScreen(
         viewModel.initialize(sessionId, modelId)
     }
     
-    val state by viewModel.state.collectAsStateWithLifecycle()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val state by viewModel.state.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = ChatState.Loading)
     var messageText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
     
@@ -49,6 +51,7 @@ fun ChatScreen(
     
     Scaffold(
         topBar = {
+            @OptIn(ExperimentalMaterial3Api::class)
             TopAppBar(
                 title = { Text("Agent Cooper") },
                 navigationIcon = {
@@ -69,77 +72,78 @@ fun ChatScreen(
                 .padding(horizontal = 16.dp)
         ) {
             when (val currentState = state) {
-            is ChatState.Loading -> {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator()
-                }
-            }
-            
-            is ChatState.Error -> {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                is ChatState.Loading -> {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = "Ошибка",
-                            style = MaterialTheme.typography.headlineSmall
-                        )
-                        Text(
-                            text = currentState.message,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Button(onClick = { viewModel.handleIntent(ChatIntent.ClearError) }) {
-                            Text("Повторить")
-                        }
+                        CircularProgressIndicator()
                     }
                 }
-            }
-            
-            is ChatState.Success -> {
-                // Messages list
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(vertical = 16.dp)
-                ) {
-                    items(currentState.messages) { message ->
-                        MessageBubble(
-                            message = message,
-                            isStreaming = currentState.isStreaming && 
-                                    message.id == "streaming"
-                        )
-                    }
-                    
-                    // Typing indicator
-                    if (currentState.isStreaming && currentState.messages.none { it.id == "streaming" }) {
-                        item {
-                            TypingIndicator()
+                
+                is ChatState.Error -> {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Text(
+                                text = "Ошибка",
+                                style = MaterialTheme.typography.headlineSmall
+                            )
+                            Text(
+                                text = currentState.message,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Button(onClick = { viewModel.handleIntent(ChatIntent.ClearError) }) {
+                                Text("Повторить")
+                            }
                         }
                     }
                 }
                 
-                // Input field
-                MessageInput(
-                    text = messageText,
-                    onTextChange = { messageText = it },
-                    onSend = {
-                        if (messageText.isNotBlank()) {
-                            viewModel.handleIntent(ChatIntent.SendMessage(messageText))
-                            messageText = ""
+                is ChatState.Success -> {
+                    // Messages list
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(vertical = 16.dp)
+                    ) {
+                        items(currentState.messages) { message ->
+                            MessageBubble(
+                                message = message,
+                                isStreaming = currentState.isStreaming && 
+                                        message.id == "streaming"
+                            )
                         }
-                    },
-                    enabled = !currentState.isStreaming
-                )
+                        
+                        // Typing indicator
+                        if (currentState.isStreaming && currentState.messages.none { it.id == "streaming" }) {
+                            item {
+                                TypingIndicator()
+                            }
+                        }
+                    }
+                    
+                    // Input field
+                    MessageInput(
+                        text = messageText,
+                        onTextChange = { messageText = it },
+                        onSend = {
+                            if (messageText.isNotBlank()) {
+                                viewModel.handleIntent(ChatIntent.SendMessage(messageText))
+                                messageText = ""
+                            }
+                        },
+                        enabled = !currentState.isStreaming
+                    )
+                }
             }
         }
     }
@@ -227,8 +231,7 @@ fun MessageInput(
         
         FloatingActionButton(
             onClick = onSend,
-            modifier = Modifier.size(56.dp),
-            enabled = enabled && text.isNotBlank()
+            modifier = Modifier.size(56.dp)
         ) {
             Icon(
                 imageVector = Icons.Default.Send,

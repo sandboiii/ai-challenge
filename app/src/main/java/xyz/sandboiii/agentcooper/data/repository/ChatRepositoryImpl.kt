@@ -13,7 +13,9 @@ import xyz.sandboiii.agentcooper.domain.model.MessageRole
 import xyz.sandboiii.agentcooper.domain.repository.ChatRepository
 import xyz.sandboiii.agentcooper.util.Constants
 
-class ChatRepositoryImpl(
+import javax.inject.Inject
+
+class ChatRepositoryImpl @Inject constructor(
     private val chatApi: ChatApi,
     private val database: AppDatabase
 ) : ChatRepository {

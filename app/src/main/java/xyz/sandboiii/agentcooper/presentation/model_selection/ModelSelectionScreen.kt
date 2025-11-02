@@ -11,17 +11,20 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.platform.LocalLifecycleOwner
 
 @Composable
 fun ModelSelectionScreen(
     onModelSelected: () -> Unit,
     viewModel: ModelSelectionViewModel = hiltViewModel()
 ) {
-    val state by viewModel.state.collectAsStateWithLifecycle()
-    val selectedModel by viewModel.selectedModel.collectAsStateWithLifecycle()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val state by viewModel.state.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = ModelSelectionState.Loading)
+    val selectedModel by viewModel.selectedModel.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = null)
     
     Scaffold(
         topBar = {
+            @OptIn(ExperimentalMaterial3Api::class)
             TopAppBar(
                 title = { Text("Выберите модель") }
             )
@@ -73,6 +76,7 @@ fun ModelSelectionScreen(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    @OptIn(ExperimentalMaterial3Api::class)
                     items(currentState.models) { model ->
                         ModelItem(
                             model = model,
@@ -89,6 +93,7 @@ fun ModelSelectionScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ModelItem(
     model: xyz.sandboiii.agentcooper.domain.model.AIModel,

@@ -6,7 +6,7 @@ import xyz.sandboiii.agentcooper.domain.repository.ChatRepository
 class SendMessageUseCase(
     private val chatRepository: ChatRepository
 ) {
-    operator fun invoke(
+    suspend operator fun invoke(
         sessionId: String,
         content: String,
         modelId: String

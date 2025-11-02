@@ -10,7 +10,7 @@ data class OpenRouterModelsResponse(
 @Serializable
 data class ModelData(
     val id: String,
-    val name: String,
+    val name: String? = null,
     val description: String? = null,
     val context_length: Int? = null,
     val architecture: Architecture? = null,
