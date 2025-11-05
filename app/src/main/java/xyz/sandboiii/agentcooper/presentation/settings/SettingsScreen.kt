@@ -1,8 +1,10 @@
 package xyz.sandboiii.agentcooper.presentation.settings
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
@@ -31,24 +33,37 @@ fun SettingsScreen(
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val apiKey by viewModel.apiKey.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = "")
+    val systemPrompt by viewModel.systemPrompt.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = "")
+    val suggestionsEnabled by viewModel.suggestionsEnabled.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
     val saveSuccess by viewModel.saveSuccess.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
+    val saveSystemPromptSuccess by viewModel.saveSystemPromptSuccess.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = null)
     val isDeletingSessions by viewModel.isDeletingSessions.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
     val deleteSessionsSuccess by viewModel.deleteSessionsSuccess.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
     
     var showDeleteConfirmation by remember { mutableStateOf(false) }
     
-    var localApiKey by remember { mutableStateOf(apiKey) }
+    // Initialize local state only once, sync when needed
+    var localApiKey by remember { mutableStateOf("") }
+    var localSystemPrompt by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
     
-    // Update local state when API key is loaded
+    // Sync local state with ViewModel state only when ViewModel state changes (not on every recomposition)
     LaunchedEffect(apiKey) {
-        localApiKey = apiKey
+        if (localApiKey != apiKey) {
+            localApiKey = apiKey
+        }
     }
     
-    // Clear success message after showing it
+    LaunchedEffect(systemPrompt) {
+        if (localSystemPrompt != systemPrompt) {
+            localSystemPrompt = systemPrompt
+        }
+    }
+    
+    // Optimize success message clearing - only trigger when value becomes true
     LaunchedEffect(saveSuccess) {
         if (saveSuccess) {
             kotlinx.coroutines.delay(2000)
@@ -56,7 +71,13 @@ fun SettingsScreen(
         }
     }
     
-    // Clear delete success message after showing it
+    LaunchedEffect(saveSystemPromptSuccess) {
+        if (saveSystemPromptSuccess) {
+            kotlinx.coroutines.delay(2000)
+            viewModel.clearSaveSystemPromptSuccess()
+        }
+    }
+    
     LaunchedEffect(deleteSessionsSuccess) {
         if (deleteSessionsSuccess) {
             kotlinx.coroutines.delay(2000)
@@ -79,10 +100,13 @@ fun SettingsScreen(
             )
         }
     ) { padding ->
+        val scrollState = rememberScrollState()
+        
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .verticalScroll(scrollState)
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -111,7 +135,7 @@ fun SettingsScreen(
                         value = localApiKey,
                         onValueChange = { 
                             localApiKey = it
-                            viewModel.updateApiKey(it)
+                            // Don't update ViewModel on every keystroke to reduce lag
                         },
                         label = { Text("API Ключ") },
                         placeholder = { Text("sk-or-v1-...") },
@@ -160,6 +184,8 @@ fun SettingsScreen(
                     Button(
                         onClick = {
                             keyboardController?.hide()
+                            // Update ViewModel right before saving
+                            viewModel.updateApiKey(localApiKey)
                             viewModel.saveApiKey()
                         },
                         modifier = Modifier.fillMaxWidth(),
@@ -182,6 +208,134 @@ fun SettingsScreen(
                                 color = Color.White
                             )
                         }
+                    }
+                }
+            }
+            
+            // System Prompt Section
+            Card(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "Системный промпт",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    
+                    Text(
+                        text = "Этот промпт определяет поведение и стиль ответов AI модели в чате.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    
+                    OutlinedTextField(
+                        value = localSystemPrompt,
+                        onValueChange = { 
+                            localSystemPrompt = it
+                            // Don't update ViewModel on every keystroke to reduce lag
+                        },
+                        label = { Text("Системный промпт") },
+                        placeholder = { Text("Введите системный промпт...") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 120.dp, max = 300.dp),
+                        minLines = 4,
+                        maxLines = 10,
+                        enabled = !isLoading,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(
+                            onDone = {
+                                keyboardController?.hide()
+                                viewModel.saveSystemPrompt()
+                            }
+                        ),
+                        isError = errorMessage != null
+                    )
+                    
+                    if (saveSystemPromptSuccess) {
+                        Text(
+                            text = "Системный промпт успешно сохранён",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    
+                    Button(
+                        onClick = {
+                            keyboardController?.hide()
+                            // Update ViewModel right before saving
+                            viewModel.updateSystemPrompt(localSystemPrompt)
+                            viewModel.saveSystemPrompt()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isLoading && localSystemPrompt.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF6200EE),
+                            contentColor = Color.White,
+                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    ) {
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = Color.White
+                            )
+                        } else {
+                            Text(
+                                "Сохранить промпт",
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
+            }
+            
+            // Suggestions Toggle Section
+            Card(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = "Предложения ответов",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            
+                            Text(
+                                text = "Включить автоматические предложения ответов на сообщения AI",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        
+                        Switch(
+                            checked = suggestionsEnabled,
+                            onCheckedChange = { viewModel.updateSuggestionsEnabled(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Color(0xFF6200EE), // Use the same purple as buttons
+                                uncheckedThumbColor = Color(0xFF757575), // Dark gray for visibility
+                                uncheckedTrackColor = Color(0xFFE0E0E0) // Light gray with contrast
+                            )
+                        )
                     }
                 }
             }

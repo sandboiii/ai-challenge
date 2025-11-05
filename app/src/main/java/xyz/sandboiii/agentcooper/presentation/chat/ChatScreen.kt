@@ -4,12 +4,15 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.*
@@ -38,6 +41,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -164,7 +169,10 @@ fun ChatScreen(
                             MessageBubble(
                                 message = message,
                                 isStreaming = currentState.isStreaming &&
-                                        message.id == "streaming"
+                                        message.id == "streaming",
+                                onSuggestionClick = { suggestion ->
+                                    viewModel.handleIntent(ChatIntent.SendMessage(suggestion))
+                                }
                             )
                         }
                         
@@ -234,9 +242,11 @@ fun ChatScreen(
 @Composable
 fun MessageBubble(
     message: xyz.sandboiii.agentcooper.domain.model.ChatMessage,
-    isStreaming: Boolean
+    isStreaming: Boolean,
+    onSuggestionClick: (String) -> Unit = {}
 ) {
     val isUser = message.role == MessageRole.USER
+    var showJsonDialog by remember { mutableStateOf(false) }
     
     val slideIn = remember {
         slideInHorizontally(
@@ -256,37 +266,171 @@ fun MessageBubble(
         visible = true,
         enter = slideIn + fadeIn
     ) {
-        Row(
+        Column(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
+            horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
         ) {
-            Surface(
-                modifier = Modifier
-                    .widthIn(max = 280.dp)
-                    .clip(RoundedCornerShape(16.dp)),
-                color = if (isUser) {
-                    // Use a darker, more contrasting color for user messages
-                    // This ensures white text is always visible
-                    Color(0xFF6200EE) // Material Design Purple 700
-                } else {
-                    MaterialTheme.colorScheme.surfaceVariant
-                },
-                tonalElevation = 2.dp
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
             ) {
-                Text(
-                    text = message.content,
-                    modifier = Modifier.padding(12.dp),
-                    style = MaterialTheme.typography.bodyMedium,
+                Surface(
+                    modifier = Modifier
+                        .widthIn(max = 280.dp)
+                        .clip(RoundedCornerShape(16.dp)),
                     color = if (isUser) {
-                        // Always use white on user message bubbles for maximum contrast
-                        Color.White
+                        // Use a darker, more contrasting color for user messages
+                        // This ensures white text is always visible
+                        Color(0xFF6200EE) // Material Design Purple 700
                     } else {
-                        // Use onSurface for better contrast on surfaceVariant
-                        MaterialTheme.colorScheme.onSurface
+                        MaterialTheme.colorScheme.surfaceVariant
+                    },
+                    tonalElevation = 2.dp
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        // Show mood if available - make it bigger and more visible
+                        if (!isUser && message.mood != null && !isStreaming) {
+                            Text(
+                                text = message.mood,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = if (isUser) {
+                                    Color.White
+                                } else {
+                                    // Use onSurface for contrast on surfaceVariant background
+                                    MaterialTheme.colorScheme.onSurface
+                                },
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+                        }
+                        
+                        Text(
+                            text = message.content,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (isUser) {
+                                // Always use white on user message bubbles for maximum contrast
+                                Color.White
+                            } else {
+                                // Use onSurface for better contrast on surfaceVariant
+                                MaterialTheme.colorScheme.onSurface
+                            }
+                        )
+                        
+                        // Show JSON button if raw JSON is available
+                        if (!isUser && !isStreaming && message.rawJson != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            TextButton(
+                                onClick = { showJsonDialog = true },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                colors = ButtonDefaults.textButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.onSurface
+                                )
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Code,
+                                    contentDescription = "Показать JSON",
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Показать JSON",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
                     }
-                )
+                }
+            }
+            
+            // Show suggestion buttons for assistant messages (not streaming)
+            if (!isUser && !isStreaming && message.suggestions.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = if (isUser) 0.dp else 16.dp, end = if (isUser) 16.dp else 0.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Each suggestion on a separate line
+                    message.suggestions.forEach { suggestion ->
+                        SuggestionButton(
+                            text = suggestion,
+                            onClick = { onSuggestionClick(suggestion) },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
             }
         }
+    }
+    
+    // JSON Dialog
+    if (showJsonDialog && message.rawJson != null) {
+        AlertDialog(
+            onDismissRequest = { showJsonDialog = false },
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Raw JSON")
+                    IconButton(
+                        onClick = { showJsonDialog = false },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Закрыть",
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+            },
+            text = {
+                Column {
+                    Text(
+                        text = message.rawJson,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState())
+                            .padding(8.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showJsonDialog = false }) {
+                    Text("Закрыть")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun SuggestionButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier,
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = ButtonDefaults.outlinedButtonColors(
+            contentColor = MaterialTheme.colorScheme.onSurface
+        )
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.Start
+        )
     }
 }
 

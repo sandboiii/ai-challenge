@@ -90,6 +90,9 @@ dependencies {
     implementation("io.ktor:ktor-serialization-kotlinx-json:2.3.5")
     implementation("io.ktor:ktor-client-logging:2.3.5")
     
+    // Kotlinx Serialization JSON
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
+    
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     

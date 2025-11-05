@@ -5,7 +5,10 @@ data class ChatMessage(
     val content: String,
     val role: MessageRole,
     val timestamp: Long,
-    val sessionId: String
+    val sessionId: String,
+    val mood: String? = null,
+    val suggestions: List<String> = emptyList(),
+    val rawJson: String? = null
 )
 
 enum class MessageRole {
