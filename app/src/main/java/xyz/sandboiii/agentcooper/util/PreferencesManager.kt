@@ -21,12 +21,14 @@ class PreferencesManager @Inject constructor(
         const val DEFAULT_API_KEY = "INSERT_YOUR_KEY"
         private val SYSTEM_PROMPT = stringPreferencesKey(Constants.PREF_SYSTEM_PROMPT)
         private val SUGGESTIONS_ENABLED = booleanPreferencesKey(Constants.PREF_SUGGESTIONS_ENABLED)
+        private val WELCOME_MESSAGE_ENABLED = booleanPreferencesKey(Constants.PREF_WELCOME_MESSAGE_ENABLED)
     }
     
     val apiKey: Flow<String?> = dataStore.data.map { it[API_KEY] }
     val selectedModel: Flow<String?> = dataStore.data.map { it[SELECTED_MODEL] }
     val systemPrompt: Flow<String?> = dataStore.data.map { it[SYSTEM_PROMPT] }
     val suggestionsEnabled: Flow<Boolean> = dataStore.data.map { it[SUGGESTIONS_ENABLED] ?: false }
+    val welcomeMessageEnabled: Flow<Boolean> = dataStore.data.map { it[WELCOME_MESSAGE_ENABLED] ?: true }
     
     suspend fun setApiKey(key: String) {
         dataStore.edit { it[API_KEY] = key }
@@ -50,6 +52,14 @@ class PreferencesManager @Inject constructor(
     
     suspend fun getSuggestionsEnabled(): Boolean {
         return dataStore.data.first()[SUGGESTIONS_ENABLED] ?: false
+    }
+    
+    suspend fun setWelcomeMessageEnabled(enabled: Boolean) {
+        dataStore.edit { it[WELCOME_MESSAGE_ENABLED] = enabled }
+    }
+    
+    suspend fun getWelcomeMessageEnabled(): Boolean {
+        return dataStore.data.first()[WELCOME_MESSAGE_ENABLED] ?: true
     }
     
     suspend fun getApiKey(): String? {

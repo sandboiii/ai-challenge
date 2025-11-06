@@ -27,6 +27,9 @@ class SettingsViewModel @Inject constructor(
     private val _suggestionsEnabled = MutableStateFlow(false)
     val suggestionsEnabled: StateFlow<Boolean> = _suggestionsEnabled.asStateFlow()
     
+    private val _welcomeMessageEnabled = MutableStateFlow(true)
+    val welcomeMessageEnabled: StateFlow<Boolean> = _welcomeMessageEnabled.asStateFlow()
+    
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
     
@@ -49,6 +52,7 @@ class SettingsViewModel @Inject constructor(
         loadApiKey()
         loadSystemPrompt()
         loadSuggestionsEnabled()
+        loadWelcomeMessageEnabled()
     }
     
     private fun loadApiKey() {
@@ -183,6 +187,29 @@ class SettingsViewModel @Inject constructor(
                 _suggestionsEnabled.value = enabled
             } catch (e: Exception) {
                 _errorMessage.value = "Ошибка сохранения настроек предложений: ${e.message}"
+            }
+        }
+    }
+    
+    private fun loadWelcomeMessageEnabled() {
+        viewModelScope.launch {
+            try {
+                val enabled = preferencesManager.getWelcomeMessageEnabled()
+                _welcomeMessageEnabled.value = enabled
+            } catch (e: Exception) {
+                _errorMessage.value = "Ошибка загрузки настроек приветственного сообщения: ${e.message}"
+                _welcomeMessageEnabled.value = true
+            }
+        }
+    }
+    
+    fun updateWelcomeMessageEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            try {
+                preferencesManager.setWelcomeMessageEnabled(enabled)
+                _welcomeMessageEnabled.value = enabled
+            } catch (e: Exception) {
+                _errorMessage.value = "Ошибка сохранения настроек приветственного сообщения: ${e.message}"
             }
         }
     }

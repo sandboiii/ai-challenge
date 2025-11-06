@@ -33,6 +33,8 @@ class ChatViewModel @Inject constructor(
     private val _state = MutableStateFlow<ChatState>(ChatState.Loading)
     val state: StateFlow<ChatState> = _state.asStateFlow()
     
+    val welcomeMessageEnabled = preferencesManager.welcomeMessageEnabled
+    
     private var currentSessionId: String? = null
     private var currentModelId: String? = null
     

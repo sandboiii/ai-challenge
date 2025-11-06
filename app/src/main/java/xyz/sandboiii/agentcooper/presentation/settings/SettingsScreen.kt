@@ -35,6 +35,7 @@ fun SettingsScreen(
     val apiKey by viewModel.apiKey.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = "")
     val systemPrompt by viewModel.systemPrompt.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = "")
     val suggestionsEnabled by viewModel.suggestionsEnabled.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
+    val welcomeMessageEnabled by viewModel.welcomeMessageEnabled.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = true)
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
     val saveSuccess by viewModel.saveSuccess.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
     val saveSystemPromptSuccess by viewModel.saveSystemPromptSuccess.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
@@ -334,6 +335,50 @@ fun SettingsScreen(
                                 checkedTrackColor = Color(0xFF6200EE), // Use the same purple as buttons
                                 uncheckedThumbColor = Color(0xFF757575), // Dark gray for visibility
                                 uncheckedTrackColor = Color(0xFFE0E0E0) // Light gray with contrast
+                            )
+                        )
+                    }
+                }
+            }
+            
+            // Welcome Message Toggle Section
+            Card(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = "Приветственное сообщение",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            
+                            Text(
+                                text = "Показывать приветственное сообщение в каждом новом чате",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        
+                        Switch(
+                            checked = welcomeMessageEnabled,
+                            onCheckedChange = { viewModel.updateWelcomeMessageEnabled(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Color(0xFF6200EE),
+                                uncheckedThumbColor = Color(0xFF757575),
+                                uncheckedTrackColor = Color(0xFFE0E0E0)
                             )
                         )
                     }

@@ -7,11 +7,13 @@ import xyz.sandboiii.agentcooper.data.local.database.AppDatabase
 import xyz.sandboiii.agentcooper.data.local.entity.SessionEntity
 import xyz.sandboiii.agentcooper.domain.model.ChatSession
 import xyz.sandboiii.agentcooper.domain.repository.SessionRepository
+import xyz.sandboiii.agentcooper.util.PreferencesManager
 
 import javax.inject.Inject
 
 class SessionRepositoryImpl @Inject constructor(
-    private val database: AppDatabase
+    private val database: AppDatabase,
+    private val preferencesManager: PreferencesManager
 ) : SessionRepository {
     
     companion object {
@@ -41,16 +43,21 @@ class SessionRepositoryImpl @Inject constructor(
         )
         database.sessionDao().insertSession(session)
         
-        // Create welcome message in the database
-        val welcomeMessage = xyz.sandboiii.agentcooper.data.local.entity.ChatMessageEntity(
-            id = "welcome-${session.id}",
-            content = xyz.sandboiii.agentcooper.util.Constants.WELCOME_MESSAGE,
-            role = xyz.sandboiii.agentcooper.domain.model.MessageRole.ASSISTANT,
-            timestamp = System.currentTimeMillis(),
-            sessionId = session.id
-        )
-        database.chatMessageDao().insertMessage(welcomeMessage)
-        android.util.Log.d(TAG, "Created welcome message for session: ${session.id}")
+        // Create welcome message only if enabled in settings
+        val welcomeMessageEnabled = preferencesManager.getWelcomeMessageEnabled()
+        if (welcomeMessageEnabled) {
+            val welcomeMessage = xyz.sandboiii.agentcooper.data.local.entity.ChatMessageEntity(
+                id = "welcome-${session.id}",
+                content = xyz.sandboiii.agentcooper.util.Constants.WELCOME_MESSAGE,
+                role = xyz.sandboiii.agentcooper.domain.model.MessageRole.ASSISTANT,
+                timestamp = System.currentTimeMillis(),
+                sessionId = session.id
+            )
+            database.chatMessageDao().insertMessage(welcomeMessage)
+            android.util.Log.d(TAG, "Created welcome message for session: ${session.id}")
+        } else {
+            android.util.Log.d(TAG, "Welcome message disabled, skipping for session: ${session.id}")
+        }
         
         return session.toDomain()
     }

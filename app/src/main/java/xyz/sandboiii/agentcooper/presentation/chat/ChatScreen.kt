@@ -20,6 +20,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.border
+import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.Indication
@@ -52,6 +53,9 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.text.selection.TextSelectionColors
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
+import androidx.compose.runtime.CompositionLocalProvider
 import xyz.sandboiii.agentcooper.domain.model.MessageRole
 
 @Composable
@@ -67,29 +71,94 @@ fun ChatScreen(
     
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val state by viewModel.state.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = ChatState.Loading)
+    val welcomeMessageEnabled by viewModel.welcomeMessageEnabled.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = true)
     var messageText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+    var isInputFocused by remember { mutableStateOf(false) }
+    
+    // Helper function to scroll to bottom edge
+    suspend fun scrollToBottomEdge(filteredMessages: List<*>) {
+        if (filteredMessages.isEmpty()) return
+        
+        kotlinx.coroutines.delay(100) // Small delay to ensure layout is ready
+        // Scroll to last item
+        listState.animateScrollToItem(filteredMessages.size - 1)
+        // Wait for scroll animation to complete
+        kotlinx.coroutines.delay(100)
+        
+        // Calculate total content height and scroll to bottom edge
+        val layoutInfo = listState.layoutInfo
+        var totalHeight = 0
+        layoutInfo.visibleItemsInfo.forEach { itemInfo ->
+            totalHeight += itemInfo.size
+        }
+        
+        // Get the last item's bottom position
+        val lastItemIndex = filteredMessages.size - 1
+        val lastItemInfo = layoutInfo.visibleItemsInfo.lastOrNull { it.index == lastItemIndex }
+        if (lastItemInfo != null) {
+            val lastItemBottom = lastItemInfo.offset + lastItemInfo.size
+            val viewportHeight = layoutInfo.viewportSize.height
+            val scrollOffset = lastItemBottom - viewportHeight + layoutInfo.afterContentPadding
+            
+            // Scroll to the calculated offset
+            if (scrollOffset > 0) {
+                listState.animateScrollToItem(
+                    index = lastItemIndex,
+                    scrollOffset = scrollOffset
+                )
+            }
+        }
+    }
     
     // Scroll to bottom when new messages arrive
-    LaunchedEffect(state) {
+    LaunchedEffect(state, welcomeMessageEnabled) {
         if (state is ChatState.Success) {
             val messages = (state as ChatState.Success).messages
-            if (messages.isNotEmpty()) {
-                kotlinx.coroutines.delay(100) // Small delay to ensure layout is ready
-                listState.animateScrollToItem(messages.size - 1)
+            val filteredMessages = if (welcomeMessageEnabled) {
+                messages
+            } else {
+                messages.filter { !it.id.startsWith("welcome-") }
+            }
+            if (filteredMessages.isNotEmpty()) {
+                scrollToBottomEdge(filteredMessages)
             }
         }
     }
     
     // Scroll to bottom when keyboard appears or message text changes
-    LaunchedEffect(messageText) {
+    LaunchedEffect(messageText, welcomeMessageEnabled) {
         if (messageText.isNotEmpty()) {
             val currentState = state
             if (currentState is ChatState.Success) {
                 val messages = currentState.messages
-                if (messages.isNotEmpty()) {
-                    kotlinx.coroutines.delay(100)
-                    listState.animateScrollToItem(messages.size - 1)
+                val filteredMessages = if (welcomeMessageEnabled) {
+                    messages
+                } else {
+                    messages.filter { !it.id.startsWith("welcome-") }
+                }
+                if (filteredMessages.isNotEmpty()) {
+                    scrollToBottomEdge(filteredMessages)
+                }
+            }
+        }
+    }
+    
+    // Scroll to bottom when input field gets focus (keyboard opens)
+    LaunchedEffect(isInputFocused) {
+        if (isInputFocused) {
+            val currentState = state
+            if (currentState is ChatState.Success) {
+                val messages = currentState.messages
+                val filteredMessages = if (welcomeMessageEnabled) {
+                    messages
+                } else {
+                    messages.filter { !it.id.startsWith("welcome-") }
+                }
+                if (filteredMessages.isNotEmpty()) {
+                    // Delay to allow keyboard animation to start
+                    kotlinx.coroutines.delay(150)
+                    scrollToBottomEdge(filteredMessages)
                 }
             }
         }
@@ -164,8 +233,15 @@ fun ChatScreen(
                             bottom = 16.dp // Extra padding at bottom to keep messages visible above input
                         )
                     ) {
+                        // Filter messages based on welcome message toggle
+                        val filteredMessages = if (welcomeMessageEnabled) {
+                            currentState.messages
+                        } else {
+                            currentState.messages.filter { !it.id.startsWith("welcome-") }
+                        }
+                        
                         // Show all messages (user and assistant) - welcome message is now in the database
-                        items(currentState.messages) { message ->
+                        items(filteredMessages) { message ->
                             MessageBubble(
                                 message = message,
                                 isStreaming = currentState.isStreaming &&
@@ -231,6 +307,9 @@ fun ChatScreen(
                         },
                         enabled = !currentState.isStreaming.also { 
                             android.util.Log.d("ChatScreen", "MessageInput enabled: ${!currentState.isStreaming}, isStreaming: ${currentState.isStreaming}")
+                        },
+                        onFocusChange = { isFocused ->
+                            isInputFocused = isFocused
                         }
                     )
                 }
@@ -500,7 +579,8 @@ fun MessageInput(
     text: String,
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
-    enabled: Boolean
+    enabled: Boolean,
+    onFocusChange: ((Boolean) -> Unit)? = null
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
@@ -514,6 +594,9 @@ fun MessageInput(
     
     LaunchedEffect(isFocused) {
         android.util.Log.d("MessageInput", "isFocused changed: $isFocused, enabled: $enabled")
+        // Notify parent about focus change
+        onFocusChange?.invoke(isFocused)
+        
         if (isFocused && enabled) {
             android.util.Log.d("MessageInput", "Field is focused and enabled, showing keyboard after delay")
             // Small delay to ensure focus is fully established
@@ -544,6 +627,31 @@ fun MessageInput(
         Color(0xFF1976D2) // Material Blue 700 - clearly visible and distinct from placeholder
     }
     
+    // Background color for text input to ensure text selection handles are visible
+    // Use a darker background so that light selection handles (which use primary color) are visible
+    // The theme's primary color is light (0xFFF5F5F5), so we need a darker background
+    val inputBackgroundColor = if (isDarkTheme) {
+        Color(0xFF2D2D2D) // Darker background for dark theme - contrasts with light selection handles
+    } else {
+        Color(0xFFE0E0E0) // Darker gray background for light theme - contrasts with light selection handles
+    }
+    
+    // Text selection colors - ensure contrast with background
+    val textSelectionColors = remember {
+        TextSelectionColors(
+            handleColor = if (isDarkTheme) {
+                Color(0xFF90CAF9) // Light blue handles for dark theme - visible on dark background
+            } else {
+                Color(0xFF1976D2) // Dark blue handles for light theme - visible on light background
+            },
+            backgroundColor = if (isDarkTheme) {
+                Color(0xFF1976D2).copy(alpha = 0.4f) // Blue selection background for dark theme
+            } else {
+                Color(0xFF1976D2).copy(alpha = 0.3f) // Blue selection background for light theme
+            }
+        )
+    }
+    
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -551,38 +659,41 @@ fun MessageInput(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.Bottom
     ) {
-        Box(
+        Surface(
             modifier = Modifier
                 .weight(1f)
                 .heightIn(min = 56.dp) // Match OutlinedTextField default height
-                .pointerInput(enabled) {
-                    if (enabled) {
-                        detectTapGestures(
-                            onTap = {
-                                android.util.Log.d("MessageInput", "Tap detected on outer Box, enabled: $enabled")
-                                android.util.Log.d("MessageInput", "Requesting focus...")
-                                focusRequester.requestFocus()
-                                android.util.Log.d("MessageInput", "Focus requested, current isFocused state: $isFocused")
-                                android.util.Log.d("MessageInput", "Calling keyboardController.show(), controller: $keyboardController")
-                                keyboardController?.show()
-                                android.util.Log.d("MessageInput", "keyboardController.show() called")
-                            }
-                        )
+                .then(
+                    // Only handle taps on the outer surface when field is not focused
+                    // When focused, let BasicTextField handle taps for cursor positioning
+                    if (enabled && !isFocused) {
+                        Modifier.pointerInput(Unit) {
+                            detectTapGestures(
+                                onTap = {
+                                    android.util.Log.d("MessageInput", "Tap detected on outer Surface, requesting focus")
+                                    focusRequester.requestFocus()
+                                    keyboardController?.show()
+                                }
+                            )
+                        }
                     } else {
-                        android.util.Log.d("MessageInput", "Tap detected but field is disabled")
+                        Modifier
                     }
+                ),
+            shape = RoundedCornerShape(24.dp),
+            color = inputBackgroundColor,
+            border = androidx.compose.foundation.BorderStroke(
+                width = 1.dp,
+                color = if (isFocused) {
+                    focusedBorderColor
+                } else {
+                    unfocusedBorderColor
                 }
-                .border(
-                    width = 1.dp, // Standard Material Design border width
-                    color = if (isFocused) {
-                        focusedBorderColor
-                    } else {
-                        unfocusedBorderColor
-                    },
-                    shape = RoundedCornerShape(24.dp)
-                )
+            ),
+            tonalElevation = 0.dp
         ) {
-            BasicTextField(
+            CompositionLocalProvider(LocalTextSelectionColors provides textSelectionColors) {
+                BasicTextField(
                 value = text,
                 onValueChange = { newText ->
                     android.util.Log.d("MessageInput", "Text changed: ${newText.length} chars")
@@ -593,23 +704,7 @@ fun MessageInput(
                 modifier = Modifier
                     .fillMaxWidth()
                     .focusRequester(focusRequester)
-                    .padding(horizontal = 16.dp, vertical = 16.dp) // Increased padding to match OutlinedTextField
-                    .then(
-                        if (enabled) {
-                            Modifier.pointerInput(Unit) {
-                                detectTapGestures(
-                                    onTap = {
-                                        android.util.Log.d("MessageInput", "Tap detected directly on BasicTextField")
-                                        android.util.Log.d("MessageInput", "Requesting focus and showing keyboard")
-                                        focusRequester.requestFocus()
-                                        keyboardController?.show()
-                                    }
-                                )
-                            }
-                        } else {
-                            Modifier
-                        }
-                    ),
+                    .padding(horizontal = 16.dp, vertical = 16.dp), // Increased padding to match OutlinedTextField
                 textStyle = TextStyle(
                     color = MaterialTheme.colorScheme.onSurface,
                     fontSize = MaterialTheme.typography.bodyMedium.fontSize,
@@ -629,22 +724,23 @@ fun MessageInput(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 2.dp) // Additional vertical padding for text alignment
-                            .pointerInput(enabled) {
-                                if (enabled) {
-                                    detectTapGestures(
-                                        onTap = {
-                                            android.util.Log.d("MessageInput", "Tap detected on decorationBox (placeholder area), enabled: $enabled")
-                                            android.util.Log.d("MessageInput", "Requesting focus...")
-                                            focusRequester.requestFocus()
-                                            android.util.Log.d("MessageInput", "Focus requested, calling keyboardController.show(), controller: $keyboardController")
-                                            keyboardController?.show()
-                                            android.util.Log.d("MessageInput", "keyboardController.show() called from decorationBox")
-                                        }
-                                    )
+                            .then(
+                                // Only handle taps on placeholder area (when text is empty) to request focus
+                                // When text exists, let BasicTextField handle taps for cursor positioning
+                                if (enabled && text.isEmpty()) {
+                                    Modifier.pointerInput(Unit) {
+                                        detectTapGestures(
+                                            onTap = {
+                                                android.util.Log.d("MessageInput", "Tap detected on placeholder area")
+                                                focusRequester.requestFocus()
+                                                keyboardController?.show()
+                                            }
+                                        )
+                                    }
                                 } else {
-                                    android.util.Log.d("MessageInput", "Tap detected on decorationBox but field is disabled")
+                                    Modifier
                                 }
-                            }
+                            )
                     ) {
                         if (text.isEmpty()) {
                             Text(
@@ -657,6 +753,7 @@ fun MessageInput(
                     }
                 }
             )
+            }
         }
         
         FloatingActionButton(
