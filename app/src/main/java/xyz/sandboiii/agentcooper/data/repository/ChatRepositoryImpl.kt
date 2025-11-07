@@ -66,8 +66,14 @@ class ChatRepositoryImpl @Inject constructor(
         // Check if suggestions are enabled
         val suggestionsEnabled = preferencesManager.getSuggestionsEnabled()
         
-        // Get system prompt from preferences, fallback to default if not set
-        var systemPrompt = preferencesManager.getSystemPrompt() ?: Constants.DEFAULT_SYSTEM_PROMPT
+        // Get system prompt - check if this is a logical problem chat first
+        var systemPrompt = when (sessionId) {
+            Constants.LOGICAL_CHAT_DIRECT_ID -> Constants.LOGICAL_CHAT_DIRECT_PROMPT
+            Constants.LOGICAL_CHAT_STEP_BY_STEP_ID -> Constants.LOGICAL_CHAT_STEP_BY_STEP_PROMPT
+            Constants.LOGICAL_CHAT_PROMPT_WRITER_ID -> Constants.LOGICAL_CHAT_PROMPT_WRITER_PROMPT
+            Constants.LOGICAL_CHAT_EXPERTS_ID -> Constants.LOGICAL_CHAT_EXPERTS_PROMPT
+            else -> preferencesManager.getSystemPrompt() ?: Constants.DEFAULT_SYSTEM_PROMPT
+        }
         
         // If suggestions are enabled, append JSON format instructions to system prompt
         if (suggestionsEnabled) {

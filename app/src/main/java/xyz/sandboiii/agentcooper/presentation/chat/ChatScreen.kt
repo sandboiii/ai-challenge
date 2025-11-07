@@ -57,6 +57,7 @@ import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.foundation.text.selection.LocalTextSelectionColors
 import androidx.compose.runtime.CompositionLocalProvider
 import xyz.sandboiii.agentcooper.domain.model.MessageRole
+import xyz.sandboiii.agentcooper.util.Constants
 
 @Composable
 fun ChatScreen(
@@ -65,6 +66,16 @@ fun ChatScreen(
     onNavigateBack: () -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel()
 ) {
+    // Get title based on session ID
+    val screenTitle = remember(sessionId) {
+        when (sessionId) {
+            Constants.LOGICAL_CHAT_DIRECT_ID -> "Прямое решение"
+            Constants.LOGICAL_CHAT_STEP_BY_STEP_ID -> "Пошаговое решение"
+            Constants.LOGICAL_CHAT_PROMPT_WRITER_ID -> "Создатель промптов"
+            Constants.LOGICAL_CHAT_EXPERTS_ID -> "Команда экспертов"
+            else -> "Agent Cooper"
+        }
+    }
     LaunchedEffect(sessionId, modelId) {
         viewModel.initialize(sessionId, modelId)
     }
@@ -168,7 +179,7 @@ fun ChatScreen(
         topBar = {
             @OptIn(ExperimentalMaterial3Api::class)
             TopAppBar(
-                title = { Text("Agent Cooper") },
+                title = { Text(screenTitle) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(
