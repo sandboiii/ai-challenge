@@ -4,6 +4,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -22,6 +23,7 @@ class PreferencesManager @Inject constructor(
         private val SYSTEM_PROMPT = stringPreferencesKey(Constants.PREF_SYSTEM_PROMPT)
         private val SUGGESTIONS_ENABLED = booleanPreferencesKey(Constants.PREF_SUGGESTIONS_ENABLED)
         private val WELCOME_MESSAGE_ENABLED = booleanPreferencesKey(Constants.PREF_WELCOME_MESSAGE_ENABLED)
+        private val TEMPERATURE = floatPreferencesKey(Constants.PREF_TEMPERATURE)
     }
     
     val apiKey: Flow<String?> = dataStore.data.map { it[API_KEY] }
@@ -29,6 +31,7 @@ class PreferencesManager @Inject constructor(
     val systemPrompt: Flow<String?> = dataStore.data.map { it[SYSTEM_PROMPT] }
     val suggestionsEnabled: Flow<Boolean> = dataStore.data.map { it[SUGGESTIONS_ENABLED] ?: false }
     val welcomeMessageEnabled: Flow<Boolean> = dataStore.data.map { it[WELCOME_MESSAGE_ENABLED] ?: true }
+    val temperature: Flow<Float> = dataStore.data.map { it[TEMPERATURE] ?: Constants.DEFAULT_TEMPERATURE }
     
     suspend fun setApiKey(key: String) {
         dataStore.edit { it[API_KEY] = key }
@@ -60,6 +63,14 @@ class PreferencesManager @Inject constructor(
     
     suspend fun getWelcomeMessageEnabled(): Boolean {
         return dataStore.data.first()[WELCOME_MESSAGE_ENABLED] ?: true
+    }
+    
+    suspend fun setTemperature(temp: Float) {
+        dataStore.edit { it[TEMPERATURE] = temp.coerceIn(Constants.MIN_TEMPERATURE, Constants.MAX_TEMPERATURE) }
+    }
+    
+    suspend fun getTemperature(): Float {
+        return dataStore.data.first()[TEMPERATURE] ?: Constants.DEFAULT_TEMPERATURE
     }
     
     suspend fun getApiKey(): String? {

@@ -4,6 +4,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
+import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -50,6 +52,27 @@ fun SettingsScreen(
     var localSystemPrompt by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
+    
+    // Check if dark theme is active - check if onSurface is light (white-ish)
+    val isDarkTheme = MaterialTheme.colorScheme.onSurface.red > 0.9f &&
+            MaterialTheme.colorScheme.onSurface.green > 0.9f &&
+            MaterialTheme.colorScheme.onSurface.blue > 0.9f
+    
+    // Text selection colors - ensure contrast with surface
+    val textSelectionColors = remember(isDarkTheme) {
+        TextSelectionColors(
+            handleColor = if (isDarkTheme) {
+                Color(0xFF90CAF9) // Light blue handles for dark theme - visible on dark background
+            } else {
+                Color(0xFF1976D2) // Dark blue handles for light theme - visible on light background
+            },
+            backgroundColor = if (isDarkTheme) {
+                Color(0xFF1976D2).copy(alpha = 0.4f) // Blue selection background for dark theme
+            } else {
+                Color(0xFF1976D2).copy(alpha = 0.3f) // Blue selection background for light theme
+            }
+        )
+    }
     
     // Sync local state with ViewModel state only when ViewModel state changes (not on every recomposition)
     LaunchedEffect(apiKey) {
@@ -132,39 +155,51 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     
-                    OutlinedTextField(
-                        value = localApiKey,
-                        onValueChange = { 
-                            localApiKey = it
-                            // Don't update ViewModel on every keystroke to reduce lag
-                        },
-                        label = { Text("API Ключ") },
-                        placeholder = { Text("sk-or-v1-...") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        enabled = !isLoading,
-                        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                        trailingIcon = {
-                            IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                                Icon(
-                                    imageVector = if (passwordVisible) {
-                                        Icons.Default.VisibilityOff
-                                    } else {
-                                        Icons.Default.Visibility
-                                    },
-                                    contentDescription = if (passwordVisible) "Скрыть" else "Показать"
-                                )
-                            }
-                        },
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                        keyboardActions = KeyboardActions(
-                            onDone = {
-                                keyboardController?.hide()
-                                viewModel.saveApiKey()
-                            }
-                        ),
-                        isError = errorMessage != null
-                    )
+                    CompositionLocalProvider(LocalTextSelectionColors provides textSelectionColors) {
+                        OutlinedTextField(
+                            value = localApiKey,
+                            onValueChange = { 
+                                localApiKey = it
+                                // Don't update ViewModel on every keystroke to reduce lag
+                            },
+                            label = { Text("API Ключ") },
+                            placeholder = { Text("sk-or-v1-...") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            enabled = !isLoading,
+                            visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                    Icon(
+                                        imageVector = if (passwordVisible) {
+                                            Icons.Default.VisibilityOff
+                                        } else {
+                                            Icons.Default.Visibility
+                                        },
+                                        contentDescription = if (passwordVisible) "Скрыть" else "Показать"
+                                    )
+                                }
+                            },
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(
+                                onDone = {
+                                    keyboardController?.hide()
+                                    viewModel.saveApiKey()
+                                }
+                            ),
+                            isError = errorMessage != null,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                focusedBorderColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                focusedLabelColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                focusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                unfocusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        )
+                    }
                     
                     if (errorMessage != null) {
                         Text(
@@ -234,29 +269,41 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     
-                    OutlinedTextField(
-                        value = localSystemPrompt,
-                        onValueChange = { 
-                            localSystemPrompt = it
-                            // Don't update ViewModel on every keystroke to reduce lag
-                        },
-                        label = { Text("Системный промпт") },
-                        placeholder = { Text("Введите системный промпт...") },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 120.dp, max = 300.dp),
-                        minLines = 4,
-                        maxLines = 10,
-                        enabled = !isLoading,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                        keyboardActions = KeyboardActions(
-                            onDone = {
-                                keyboardController?.hide()
-                                viewModel.saveSystemPrompt()
-                            }
-                        ),
-                        isError = errorMessage != null
-                    )
+                    CompositionLocalProvider(LocalTextSelectionColors provides textSelectionColors) {
+                        OutlinedTextField(
+                            value = localSystemPrompt,
+                            onValueChange = { 
+                                localSystemPrompt = it
+                                // Don't update ViewModel on every keystroke to reduce lag
+                            },
+                            label = { Text("Системный промпт") },
+                            placeholder = { Text("Введите системный промпт...") },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 120.dp, max = 300.dp),
+                            minLines = 4,
+                            maxLines = 10,
+                            enabled = !isLoading,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(
+                                onDone = {
+                                    keyboardController?.hide()
+                                    viewModel.saveSystemPrompt()
+                                }
+                            ),
+                            isError = errorMessage != null,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                focusedBorderColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                focusedLabelColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                focusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                unfocusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        )
+                    }
                     
                     if (saveSystemPromptSuccess) {
                         Text(

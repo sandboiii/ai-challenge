@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import xyz.sandboiii.agentcooper.util.Constants
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -34,6 +35,7 @@ fun SessionsScreen(
     val state by viewModel.state.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = SessionsState.Loading)
     val selectedModel by viewModel.selectedModel.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = null)
     val createdSession by viewModel.createdSession.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = null)
+    val temperature by viewModel.temperature.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = Constants.DEFAULT_TEMPERATURE)
     
     // Navigate to newly created session
     LaunchedEffect(createdSession) {
@@ -84,6 +86,12 @@ fun SessionsScreen(
             SelectedModelCard(
                 selectedModelId = selectedModel,
                 onNavigateToModelSelection = onNavigateToModelSelection
+            )
+            
+            // Temperature Control Card
+            TemperatureCard(
+                temperature = temperature,
+                onTemperatureChange = { viewModel.updateTemperature(it) }
             )
             
             // Sessions List
@@ -227,6 +235,72 @@ fun SelectedModelCard(
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 }
+            )
+        }
+    }
+}
+
+@Composable
+fun TemperatureCard(
+    temperature: Float,
+    onTemperatureChange: (Float) -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Температура AI",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = String.format("%.1f", temperature),
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                Text(
+                    text = "${Constants.MIN_TEMPERATURE.toInt()}-${Constants.MAX_TEMPERATURE.toInt()}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            Slider(
+                value = temperature,
+                onValueChange = onTemperatureChange,
+                valueRange = Constants.MIN_TEMPERATURE..Constants.MAX_TEMPERATURE,
+                steps = 19, // 0.0 to 2.0 with 0.1 increments = 20 steps - 1
+                modifier = Modifier.fillMaxWidth(),
+                colors = SliderDefaults.colors(
+                    thumbColor = MaterialTheme.colorScheme.onSurface,
+                    activeTrackColor = MaterialTheme.colorScheme.onSurface,
+                    inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            )
+            
+            Spacer(modifier = Modifier.height(4.dp))
+            
+            Text(
+                text = "Низкие значения делают ответы более предсказуемыми, высокие - более креативными",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }

@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.border
@@ -297,34 +298,15 @@ fun ChatScreen(
                             }
                         }
                         
-                        // Loading indicator when waiting for response or when SSE stream started but content is empty
-                        // Show thinking animation if:
-                        // 1. We're waiting for response, OR
-                        // 2. We're streaming but haven't received any content yet (SSE stream just started)
-                        val shouldShowThinking = currentState.isWaitingForResponse || 
-                            (currentState.isStreaming && currentState.streamingContent.isEmpty())
-                        
-                        // Debug logging
-                        android.util.Log.d("ChatScreen", "shouldShowThinking: $shouldShowThinking")
-                        android.util.Log.d("ChatScreen", "isWaitingForResponse: ${currentState.isWaitingForResponse}")
-                        android.util.Log.d("ChatScreen", "isStreaming: ${currentState.isStreaming}")
-                        android.util.Log.d("ChatScreen", "streamingContent.isEmpty(): ${currentState.streamingContent.isEmpty()}")
-                        android.util.Log.d("ChatScreen", "messages count: ${currentState.messages.size}")
+                        // Loading indicator when waiting for response
+                        // Only show thinking animation if we're waiting for response AND there's no streaming message
+                        // Once streaming starts (even with empty content), show the streaming message instead
+                        val hasStreamingMessage = filteredMessages.any { it.id == "streaming" }
+                        val shouldShowThinking = currentState.isWaitingForResponse && !hasStreamingMessage
                         
                         if (shouldShowThinking) {
                             item {
                                 LoadingIndicator()
-                            }
-                        }
-                        
-                        // Typing indicator when streaming (after first chunk received but message not yet in list)
-                        // This should rarely happen, but keep it as fallback
-                        if (currentState.isStreaming && 
-                            currentState.messages.none { it.id == "streaming" } && 
-                            !shouldShowThinking &&
-                            currentState.streamingContent.isNotEmpty()) {
-                            item {
-                                TypingIndicator()
                             }
                         }
                     }
@@ -453,17 +435,50 @@ fun MessageBubble(
                             )
                         }
                         
-                        Text(
-                            text = parseMarkdown(message.content),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (isUser) {
-                                // Always use white on user message bubbles for maximum contrast
-                                Color.White
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            if (isStreaming) {
+                                // Debug logging
+                                android.util.Log.d("MessageBubble", "Streaming message - id: ${message.id}, content length: ${message.content.length}, content preview: ${message.content.take(100)}")
+                                
+                                // Show animated typing text when streaming
+                                // Use stable message id as key - don't include length to avoid resetting
+                                AnimatedTypingText(
+                                    key = message.id,
+                                    fullText = message.content,
+                                    textColor = if (isUser) {
+                                        Color.White
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface
+                                    },
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                
+                                Spacer(modifier = Modifier.width(2.dp))
+                                TypingCursor(
+                                    color = if (isUser) {
+                                        Color.White
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface
+                                    }
+                                )
                             } else {
-                                // Use onSurface for better contrast on surfaceVariant
-                                MaterialTheme.colorScheme.onSurface
+                                // Show full text when not streaming
+                                Text(
+                                    text = parseMarkdown(message.content),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (isUser) {
+                                        // Always use white on user message bubbles for maximum contrast
+                                        Color.White
+                                    } else {
+                                        // Use onSurface for better contrast on surfaceVariant
+                                        MaterialTheme.colorScheme.onSurface
+                                    }
+                                )
                             }
-                        )
+                        }
                         
                         // Show JSON button if raw JSON is available
                         if (!isUser && !isStreaming && message.rawJson != null) {
@@ -1072,5 +1087,102 @@ fun TypingIndicator() {
             ) {}
         }
     }
+}
+
+@Composable
+fun TypingCursor(
+    color: Color
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "typing_cursor")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(530, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "cursor_alpha"
+    )
+    
+    Box(
+        modifier = Modifier
+            .width(2.dp)
+            .height(16.dp)
+            .alpha(alpha)
+            .background(color)
+    )
+}
+
+@Composable
+fun AnimatedTypingText(
+    key: String,
+    fullText: String,
+    textColor: Color,
+    style: androidx.compose.ui.text.TextStyle,
+    modifier: Modifier = Modifier
+) {
+    // Reset displayedText when key changes (new message starts)
+    var displayedText by remember(key) { mutableStateOf("") }
+    
+    // Store fullText in a mutable state that can be observed
+    val fullTextState = remember(key) { mutableStateOf(fullText) }
+    
+    // Update fullTextState whenever fullText changes (runs during composition)
+    SideEffect {
+        val oldLength = fullTextState.value.length
+        fullTextState.value = fullText
+        if (fullText.length != oldLength) {
+            android.util.Log.d("AnimatedTypingText", "fullTextState updated - key: $key, old length: $oldLength, new length: ${fullText.length}, displayedText length: ${displayedText.length}")
+        }
+    }
+    
+    // Continuous animation loop that observes fullTextState changes via snapshotFlow
+    LaunchedEffect(key) {
+        android.util.Log.d("AnimatedTypingText", "Starting animation loop for key: $key, initial fullText length: ${fullTextState.value.length}")
+        
+        // Use snapshotFlow to observe fullTextState changes
+        snapshotFlow { fullTextState.value }
+            .collect { targetText ->
+                android.util.Log.d("AnimatedTypingText", "snapshotFlow emitted - targetText length: ${targetText.length}, displayedText length: ${displayedText.length}")
+                
+                // Animate from current displayed position to target length
+                while (displayedText.length < targetText.length) {
+                    val nextChar = targetText[displayedText.length]
+                    displayedText += nextChar
+                    
+                    android.util.Log.v("AnimatedTypingText", "Displayed char: '$nextChar', displayedText length now: ${displayedText.length}, target length: ${targetText.length}")
+                    
+                    // Variable delay based on character type for more natural typing
+                    val delay = when {
+                        nextChar == ' ' -> 50L // Faster for spaces
+                        nextChar == '\n' -> 100L // Slightly longer for newlines
+                        nextChar.isLetterOrDigit() -> 30L // Normal speed for letters/numbers
+                        else -> 40L // Slightly longer for punctuation
+                    }
+                    
+                    kotlinx.coroutines.delay(delay)
+                    
+                    // Check if targetText has changed (new chunk arrived) - if so, break and let snapshotFlow handle it
+                    val currentTarget = fullTextState.value
+                    if (currentTarget.length > targetText.length) {
+                        android.util.Log.d("AnimatedTypingText", "Target text changed during animation (new chunk), breaking to handle new target")
+                        break
+                    }
+                }
+            }
+    }
+    
+    // If fullText becomes shorter (shouldn't happen, but handle it)
+    if (fullText.length < displayedText.length) {
+        displayedText = fullText
+    }
+    
+    // Show text (even if empty, so cursor is visible)
+    Text(
+        text = parseMarkdown(displayedText),
+        style = style,
+        color = textColor,
+        modifier = modifier
+    )
 }
 

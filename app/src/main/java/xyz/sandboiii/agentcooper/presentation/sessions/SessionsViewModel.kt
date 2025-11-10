@@ -40,10 +40,21 @@ class SessionsViewModel @Inject constructor(
     private var cachedModels: List<xyz.sandboiii.agentcooper.data.remote.api.ModelDto> = emptyList()
     
     val selectedModel = preferencesManager.selectedModel
+    val temperature = preferencesManager.temperature
     
     init {
         loadSessions()
         loadSelectedModelName()
+    }
+    
+    fun updateTemperature(newTemp: Float) {
+        viewModelScope.launch {
+            try {
+                preferencesManager.setTemperature(newTemp)
+            } catch (e: Exception) {
+                // Handle error if needed
+            }
+        }
     }
     
     private fun loadSelectedModelName() {

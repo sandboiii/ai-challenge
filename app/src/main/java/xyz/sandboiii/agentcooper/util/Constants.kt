@@ -12,7 +12,12 @@ object Constants {
     const val PREF_SYSTEM_PROMPT = "system_prompt"
     const val PREF_SUGGESTIONS_ENABLED = "suggestions_enabled"
     const val PREF_WELCOME_MESSAGE_ENABLED = "welcome_message_enabled"
+    const val PREF_TEMPERATURE = "temperature"
     const val PREF_DATASTORE_NAME = "agent_cooper_prefs"
+    
+    const val DEFAULT_TEMPERATURE = 0.7f
+    const val MIN_TEMPERATURE = 0.0f
+    const val MAX_TEMPERATURE = 2.0f
     
     const val JSON_FORMAT_INSTRUCTION = """
 ВАЖНО: Ты должен отвечать ТОЛЬКО в формате JSON. Не добавляй никакого текста до или после JSON. Формат ответа должен быть строго следующим:

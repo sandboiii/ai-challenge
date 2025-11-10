@@ -56,6 +56,8 @@ class OpenRouterApi @Inject constructor(
         val apiKey = preferencesManager.getApiKey() 
             ?: throw IllegalStateException("API key not set. Please configure your OpenRouter API key.")
         
+        val temperature = preferencesManager.getTemperature()
+        
         val requestMessages = messages.map { 
             OpenRouterMessage(role = it.role, content = it.content) 
         }
@@ -63,7 +65,8 @@ class OpenRouterApi @Inject constructor(
         val request = OpenRouterRequest(
             model = model,
             messages = requestMessages,
-            stream = stream
+            stream = stream,
+            temperature = temperature.toDouble()
         )
         
         try {
@@ -233,6 +236,8 @@ class OpenRouterApi @Inject constructor(
         val apiKey = preferencesManager.getApiKey()
             ?: throw IllegalStateException("API key not set. Please configure your OpenRouter API key.")
 
+        val temperature = preferencesManager.getTemperature()
+
         // Create a prompt asking the AI to generate a short title
         val titlePrompt = """
             Based on this conversation, generate a short, descriptive title (2-6 words maximum). 
@@ -251,7 +256,8 @@ class OpenRouterApi @Inject constructor(
         val request = OpenRouterRequest(
             model = model,
             messages = requestMessages,
-            stream = false // Non-streaming for title generation
+            stream = false, // Non-streaming for title generation
+            temperature = temperature.toDouble()
         )
 
         return try {

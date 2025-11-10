@@ -73,24 +73,33 @@ class ChatViewModel @Inject constructor(
         getMessagesUseCase(sessionId)
             .onEach { messages ->
                 val currentState = _state.value
-                // Only preserve streaming state if we're actually still streaming
-                // If streaming has completed (no streaming message in the list), don't preserve it
-                val hasStreamingMessage = messages.any { it.id == "streaming" }
-                val preserveStreaming = currentState is ChatState.Success && currentState.isStreaming && hasStreamingMessage
-                val preserveWaiting = currentState is ChatState.Success && currentState.isWaitingForResponse
-                val preserveStreamingContent = if (preserveStreaming && currentState is ChatState.Success) currentState.streamingContent else ""
+                // Preserve streaming message if we're currently streaming
+                // The streaming message is not in the database, so we need to add it back
+                val isCurrentlyStreaming = currentState is ChatState.Success && currentState.isStreaming
                 
-                Log.d(TAG, "loadMessages: preserveStreaming=$preserveStreaming (hasStreamingMessage=$hasStreamingMessage), preserveWaiting=$preserveWaiting")
+                // IMPORTANT: Read streamingContent AFTER checking isStreaming to avoid race conditions
+                // If we're streaming, we should NOT update the messages list from database
+                // because sendMessage() is already updating it with the streaming message
+                if (isCurrentlyStreaming) {
+                    // During streaming, don't update messages from database - let sendMessage() handle it
+                    // This prevents race conditions where loadMessages() overwrites the streaming message
+                    Log.d(TAG, "loadMessages: Skipping update during streaming - sendMessage() is handling updates")
+                    return@onEach
+                }
+                
+                // Not streaming - update messages from database normally
+                val finalMessages = messages
+                val preserveWaiting = currentState is ChatState.Success && currentState.isWaitingForResponse
+                
+                Log.d(TAG, "loadMessages: Not streaming, updating from database, messages.count=${finalMessages.size}")
                 
                 _state.value = ChatState.Success(
-                    messages = messages,
+                    messages = finalMessages,
                     lastError = if (currentState is ChatState.Success) currentState.lastError else null,
-                    isStreaming = preserveStreaming,
-                    streamingContent = preserveStreamingContent,
+                    isStreaming = false,
+                    streamingContent = "",
                     isWaitingForResponse = preserveWaiting
                 )
-                
-                Log.d(TAG, "loadMessages: Updated state, isStreaming=${(_state.value as? ChatState.Success)?.isStreaming}")
             }
             .catch { e ->
                 Log.e(TAG, "Failed to load messages", e)
@@ -161,16 +170,19 @@ class ChatViewModel @Inject constructor(
                         Log.d(TAG, "Set isWaitingForResponse = false (error)")
                     }
                     .collect { chunk ->
-                        // First chunk received - hide loading animation
+                        // First chunk received - hide loading animation and create streaming message immediately
                         if (!hasReceivedFirstChunk) {
                             hasReceivedFirstChunk = true
-                            Log.d(TAG, "First chunk received, hiding loading indicator")
+                            Log.d(TAG, "First chunk received, hiding loading indicator and creating streaming message")
                         }
                         
                         accumulatedContent += chunk
-                        Log.d(TAG, "Received chunk: ${chunk.take(50)}...")
+                        Log.d(TAG, "Received chunk (length: ${chunk.length}): ${chunk.take(50)}...")
+                        Log.d(TAG, "Accumulated content length: ${accumulatedContent.length}")
                         
-                        // Create temporary assistant message for streaming
+                        // Create temporary assistant message for streaming immediately when first chunk arrives
+                        // This ensures the streaming content is displayed in real-time
+                        // Create the message even if content is empty initially (it will update as more chunks arrive)
                         val streamingMessage = ChatMessage(
                             id = "streaming",
                             content = accumulatedContent,
@@ -181,17 +193,17 @@ class ChatViewModel @Inject constructor(
                         
                         val updatedMessages = messagesWithUser + streamingMessage
                         
-                        // Only hide waiting indicator once we have actual content
-                        // This ensures thinking animation shows even if SSE stream starts but first chunk is empty
-                        val hasContent = accumulatedContent.isNotBlank()
-                        
+                        // Hide waiting indicator as soon as we receive any chunk
+                        // The streaming message will be displayed immediately, even if empty
                         _state.value = ChatState.Success(
                             messages = updatedMessages,
                             isStreaming = true,
                             streamingContent = accumulatedContent,
                             lastError = null, // Clear error when receiving chunks
-                            isWaitingForResponse = !hasContent // Keep showing loading if content is still empty
+                            isWaitingForResponse = false // Hide thinking animation once streaming starts
                         )
+                        
+                        Log.d(TAG, "Updated state: isStreaming=true, isWaitingForResponse=false, messages.count=${updatedMessages.size}, hasStreamingMessage=${updatedMessages.any { it.id == "streaming" }}")
                     }
                 
                 if (!hasError) {
