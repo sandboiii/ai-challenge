@@ -5,5 +5,6 @@ sealed class ChatIntent {
     data object LoadMessages : ChatIntent()
     data object ClearError : ChatIntent()
     data object RetryLastMessage : ChatIntent()
+    data object ClearMessages : ChatIntent()
 }
 

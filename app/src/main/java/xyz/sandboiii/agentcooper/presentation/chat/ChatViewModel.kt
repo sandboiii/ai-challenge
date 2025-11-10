@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 import xyz.sandboiii.agentcooper.domain.model.ChatMessage
 import xyz.sandboiii.agentcooper.domain.model.MessageRole
+import xyz.sandboiii.agentcooper.domain.repository.ChatRepository
 import xyz.sandboiii.agentcooper.domain.usecase.GetMessagesUseCase
 import xyz.sandboiii.agentcooper.domain.usecase.SendMessageUseCase
 import xyz.sandboiii.agentcooper.util.PreferencesManager
@@ -23,6 +24,7 @@ import javax.inject.Inject
 class ChatViewModel @Inject constructor(
     private val sendMessageUseCase: SendMessageUseCase,
     private val getMessagesUseCase: GetMessagesUseCase,
+    private val chatRepository: ChatRepository,
     private val preferencesManager: PreferencesManager
 ) : ViewModel() {
     
@@ -50,6 +52,7 @@ class ChatViewModel @Inject constructor(
             is ChatIntent.LoadMessages -> loadMessages()
             is ChatIntent.ClearError -> clearError()
             is ChatIntent.RetryLastMessage -> retryLastMessage()
+            is ChatIntent.ClearMessages -> clearMessages()
         }
     }
     
@@ -237,6 +240,24 @@ class ChatViewModel @Inject constructor(
             _state.value = currentState.copy(lastError = null, isWaitingForResponse = false)
         } else if (currentState is ChatState.Error) {
             loadMessages()
+        }
+    }
+    
+    private fun clearMessages() {
+        val sessionId = currentSessionId ?: return
+        
+        viewModelScope.launch {
+            try {
+                chatRepository.deleteMessages(sessionId)
+                // Reload messages to show empty state
+                loadMessages()
+                Log.d(TAG, "Cleared all messages for session: $sessionId")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to clear messages", e)
+                _state.value = ChatState.Error(
+                    message = e.message ?: "Failed to clear messages"
+                )
+            }
         }
     }
 }

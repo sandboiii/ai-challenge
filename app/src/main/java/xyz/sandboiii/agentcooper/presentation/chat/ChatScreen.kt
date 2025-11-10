@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.*
@@ -58,6 +59,7 @@ import androidx.compose.foundation.text.selection.LocalTextSelectionColors
 import androidx.compose.runtime.CompositionLocalProvider
 import xyz.sandboiii.agentcooper.domain.model.MessageRole
 import xyz.sandboiii.agentcooper.util.Constants
+import com.daksh.mdparserkit.core.parseMarkdown
 
 @Composable
 fun ChatScreen(
@@ -76,6 +78,17 @@ fun ChatScreen(
             else -> "Agent Cooper"
         }
     }
+    
+    // Check if this is a logical problem chat
+    val isLogicalProblemChat = remember(sessionId) {
+        sessionId == Constants.LOGICAL_CHAT_DIRECT_ID ||
+        sessionId == Constants.LOGICAL_CHAT_STEP_BY_STEP_ID ||
+        sessionId == Constants.LOGICAL_CHAT_PROMPT_WRITER_ID ||
+        sessionId == Constants.LOGICAL_CHAT_EXPERTS_ID
+    }
+    
+    // Confirmation dialog state
+    var showClearDialog by remember { mutableStateOf(false) }
     LaunchedEffect(sessionId, modelId) {
         viewModel.initialize(sessionId, modelId)
     }
@@ -186,6 +199,16 @@ fun ChatScreen(
                             imageVector = Icons.Default.ArrowBack,
                             contentDescription = "Назад"
                         )
+                    }
+                },
+                actions = {
+                    if (isLogicalProblemChat) {
+                        IconButton(onClick = { showClearDialog = true }) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = "Очистить чат"
+                            )
+                        }
                     }
                 }
             )
@@ -327,6 +350,42 @@ fun ChatScreen(
             }
         }
     }
+    
+    // Clear messages confirmation dialog
+    if (showClearDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearDialog = false },
+            title = {
+                Text("Очистить чат")
+            },
+            text = {
+                Text("Вы уверены, что хотите удалить все сообщения в этом чате? Это действие нельзя отменить.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.handleIntent(ChatIntent.ClearMessages)
+                        showClearDialog = false
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("Очистить")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showClearDialog = false },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.onSurface
+                    )
+                ) {
+                    Text("Отмена")
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -395,7 +454,7 @@ fun MessageBubble(
                         }
                         
                         Text(
-                            text = message.content,
+                            text = parseMarkdown(message.content),
                             style = MaterialTheme.typography.bodyMedium,
                             color = if (isUser) {
                                 // Always use white on user message bubbles for maximum contrast
