@@ -107,6 +107,11 @@ class ChatRepositoryImpl @Inject constructor(
         val assistantMessageId = UUID.randomUUID().toString()
         var accumulatedContent = ""
         
+        // Track response time
+        val startTime = System.currentTimeMillis()
+        var promptTokens: Int? = null
+        var completionTokens: Int? = null
+        
         // Stream response from API
         try {
             chatApi.sendMessage(messages, modelId, stream = true).collect { chunk ->
@@ -117,6 +122,19 @@ class ChatRepositoryImpl @Inject constructor(
             Log.e(TAG, "Error streaming message", e)
             throw e
         }
+        
+        val responseTimeMs = System.currentTimeMillis() - startTime
+        
+        // Estimate tokens (rough approximation: ~4 characters per token)
+        // This is a reasonable estimate since we can't get exact usage from streaming without an extra API call
+        if (accumulatedContent.isNotEmpty()) {
+            completionTokens = (accumulatedContent.length / 4).coerceAtLeast(1)
+        }
+        // Estimate prompt tokens from messages
+        val totalPromptChars = messages.sumOf { it.content.length }
+        promptTokens = (totalPromptChars / 4).coerceAtLeast(1)
+        
+        Log.d(TAG, "Estimated token usage - prompt: $promptTokens, completion: $completionTokens")
         
         // Parse JSON response if suggestions are enabled
         var messageContent = accumulatedContent
@@ -151,6 +169,26 @@ class ChatRepositoryImpl @Inject constructor(
             }
         }
         
+        // Calculate cost based on pricing
+        var totalCost: Double? = null
+        try {
+            val models = chatApi.getModels()
+            val model = models.find { it.id == modelId }
+            model?.pricing?.let { pricing ->
+                if (!pricing.isFree && promptTokens != null && completionTokens != null) {
+                    val promptPricePerMillion = pricing.prompt?.toDoubleOrNull() ?: 0.0
+                    val completionPricePerMillion = pricing.completion?.toDoubleOrNull() ?: 0.0
+                    
+                    totalCost = (promptTokens!! / 1_000_000.0) * promptPricePerMillion +
+                            (completionTokens!! / 1_000_000.0) * completionPricePerMillion
+                    
+                    Log.d(TAG, "Calculated cost: $totalCost (prompt: $promptPricePerMillion, completion: $completionPricePerMillion)")
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to calculate cost", e)
+        }
+        
         // Save assistant message (store as JSON if suggestions enabled, otherwise plain text)
         val contentToStore = if (suggestionsEnabled && mood != null && suggestions.isNotEmpty()) {
             // Store as JSON string that can be parsed later
@@ -165,7 +203,11 @@ class ChatRepositoryImpl @Inject constructor(
             content = contentToStore,
             role = MessageRole.ASSISTANT,
             timestamp = System.currentTimeMillis(),
-            sessionId = sessionId
+            sessionId = sessionId,
+            responseTimeMs = responseTimeMs,
+            promptTokens = promptTokens,
+            completionTokens = completionTokens,
+            totalCost = totalCost
         )
         database.chatMessageDao().insertMessage(assistantMessage)
         
@@ -221,7 +263,11 @@ class ChatRepositoryImpl @Inject constructor(
             sessionId = sessionId,
             mood = mood,
             suggestions = suggestions,
-            rawJson = rawJson
+            rawJson = rawJson,
+            responseTimeMs = responseTimeMs,
+            promptTokens = promptTokens,
+            completionTokens = completionTokens,
+            totalCost = totalCost
         )
     }
     

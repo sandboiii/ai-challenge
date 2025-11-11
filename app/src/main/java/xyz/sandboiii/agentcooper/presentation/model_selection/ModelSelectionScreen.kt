@@ -117,7 +117,7 @@ fun ModelItem(
                 .fillMaxWidth()
                 .padding(16.dp)
         ) {
-            // Model title - now has full width
+            // Model title
             Text(
                 text = model.name,
                 style = MaterialTheme.typography.titleMedium,
@@ -126,65 +126,47 @@ fun ModelItem(
                 modifier = Modifier.fillMaxWidth()
             )
             
-            // Pricing information below title
+            // Detailed pricing information below (if available and not free)
             model.pricing?.let { pricing ->
-                Spacer(modifier = Modifier.height(6.dp))
-                Surface(
-                    shape = MaterialTheme.shapes.small,
-                    color = if (pricing.isFree) {
-                        MaterialTheme.colorScheme.primaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.secondaryContainer
-                    }
-                ) {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                if (!pricing.isFree && (pricing.prompt != null || pricing.completion != null)) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        if (pricing.isFree) {
-                            Text(
-                                text = pricing.displayText,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        } else {
-                            // For paid models, show two lines: input and output pricing
-                            if (pricing.prompt != null && pricing.completion != null) {
-                                // First line: input pricing
+                        pricing.prompt?.let { promptPrice ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
                                 Text(
-                                    text = "${pricing.prompt} вход (ваш запрос)",
+                                    text = "Вход:",
                                     style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                // Second line: output pricing
                                 Text(
-                                    text = "${pricing.completion} выход (ответ модели)",
+                                    text = promptPrice,
                                     style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
-                            } else if (pricing.prompt != null) {
+                            }
+                        }
+                        pricing.completion?.let { completionPrice ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
                                 Text(
-                                    text = "${pricing.prompt} вход (ваш запрос)",
+                                    text = "Выход:",
                                     style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                            } else if (pricing.completion != null) {
                                 Text(
-                                    text = "${pricing.completion} выход (ответ модели)",
+                                    text = completionPrice,
                                     style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                                )
-                            } else {
-                                Text(
-                                    text = pricing.displayText,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
                             }
                         }
@@ -192,19 +174,36 @@ fun ModelItem(
                 }
             }
             
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = model.provider,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            // Provider information
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = "Провайдер:",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = model.provider,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            
+            // Description
             model.description?.let { description ->
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = description,
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }

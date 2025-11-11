@@ -480,6 +480,49 @@ fun MessageBubble(
                             }
                         }
                         
+                        // Show response metadata (time, tokens, cost) for assistant messages
+                        if (!isUser && !isStreaming && (message.responseTimeMs != null || message.promptTokens != null || message.completionTokens != null || message.totalCost != null)) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                message.responseTimeMs?.let { timeMs ->
+                                    Text(
+                                        text = "${timeMs}ms",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                
+                                if (message.promptTokens != null || message.completionTokens != null) {
+                                    val totalTokens = (message.promptTokens ?: 0) + (message.completionTokens ?: 0)
+                                    Text(
+                                        text = "${totalTokens} токенов",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    if (message.promptTokens != null && message.completionTokens != null) {
+                                        Text(
+                                            text = "(${message.promptTokens}+${message.completionTokens})",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                        )
+                                    }
+                                }
+                                
+                                message.totalCost?.let { cost ->
+                                    Text(
+                                        text = String.format("$%.6f", cost),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
+                        
                         // Show JSON button if raw JSON is available
                         if (!isUser && !isStreaming && message.rawJson != null) {
                             Spacer(modifier = Modifier.height(8.dp))

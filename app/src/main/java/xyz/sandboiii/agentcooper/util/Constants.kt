@@ -5,7 +5,7 @@ object Constants {
     
     const val WELCOME_MESSAGE = "Привет. Приятно с тобой познакомиться. У меня есть пара вопросов, если ты не против. Ты случайно не знаешь, что такое \"черный вигвам\"? И еще, ты любишь черный кофе? Мне кажется, это лучший напиток на свете. А вишневый пирог? О, это отдельная история."
     
-    const val OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+    const val HUGGINGFACE_BASE_URL = "https://router.huggingface.co/v1"
     
     const val PREF_API_KEY = "api_key"
     const val PREF_SELECTED_MODEL = "selected_model"

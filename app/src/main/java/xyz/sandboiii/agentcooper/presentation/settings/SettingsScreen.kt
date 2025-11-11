@@ -145,12 +145,12 @@ fun SettingsScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text(
-                        text = "API Ключ OpenRouter",
+                        text = "API Ключ Hugging Face",
                         style = MaterialTheme.typography.titleMedium
                     )
                     
                     Text(
-                        text = "Введите ваш API ключ от OpenRouter. Вы можете получить его на https://openrouter.ai/keys",
+                        text = "Введите ваш API ключ от Hugging Face. Вы можете получить его на https://huggingface.co/settings/tokens",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

@@ -11,6 +11,10 @@ data class ChatMessageEntity(
     val content: String,
     val role: MessageRole,
     val timestamp: Long,
-    val sessionId: String
+    val sessionId: String,
+    val responseTimeMs: Long? = null, // Response time in milliseconds
+    val promptTokens: Int? = null, // Number of prompt tokens
+    val completionTokens: Int? = null, // Number of completion tokens
+    val totalCost: Double? = null // Total cost in dollars
 )
 

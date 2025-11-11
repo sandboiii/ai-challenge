@@ -10,7 +10,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import xyz.sandboiii.agentcooper.data.remote.api.ChatApi
-import xyz.sandboiii.agentcooper.data.remote.api.OpenRouterApi
+import xyz.sandboiii.agentcooper.data.remote.api.HuggingFaceApi
 import xyz.sandboiii.agentcooper.util.Constants
 import javax.inject.Singleton
 
@@ -31,7 +31,7 @@ object NetworkModule {
     fun provideChatApi(
         preferencesManager: xyz.sandboiii.agentcooper.util.PreferencesManager
     ): ChatApi {
-        return OpenRouterApi(preferencesManager)
+        return HuggingFaceApi(preferencesManager)
     }
 }
 

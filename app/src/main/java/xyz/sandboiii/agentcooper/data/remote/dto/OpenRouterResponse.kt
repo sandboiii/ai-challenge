@@ -7,7 +7,15 @@ data class OpenRouterResponse(
     val id: String? = null,
     val model: String? = null,
     val choices: List<Choice>? = null,
+    val usage: Usage? = null, // Token usage information
     val error: Error? = null
+)
+
+@Serializable
+data class Usage(
+    val prompt_tokens: Int? = null,
+    val completion_tokens: Int? = null,
+    val total_tokens: Int? = null
 )
 
 @Serializable

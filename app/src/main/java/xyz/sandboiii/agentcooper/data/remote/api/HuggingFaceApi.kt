@@ -19,12 +19,26 @@ import xyz.sandboiii.agentcooper.util.Constants
 import xyz.sandboiii.agentcooper.util.PreferencesManager
 import javax.inject.Inject
 
-class OpenRouterApi @Inject constructor(
+class HuggingFaceApi @Inject constructor(
     private val preferencesManager: PreferencesManager
 ) : ChatApi {
     
     companion object {
-        private const val TAG = "OpenRouterApi"
+        private const val TAG = "HuggingFaceApi"
+        
+        /**
+         * Formats numeric pricing value to string format.
+         * Hugging Face provides prices as numbers (e.g., 1.2 means $1.2 per million tokens)
+         */
+        private fun formatPrice(price: Double): String {
+            // Format as price per million tokens
+            // Remove trailing zeros if it's a whole number
+            return if (price % 1.0 == 0.0) {
+                price.toInt().toString()
+            } else {
+                String.format("%.2f", price).trimEnd('0').trimEnd('.')
+            }
+        }
     }
     
     private val jsonParser = Json {
@@ -54,7 +68,7 @@ class OpenRouterApi @Inject constructor(
         stream: Boolean
     ): Flow<String> = flow {
         val apiKey = preferencesManager.getApiKey() 
-            ?: throw IllegalStateException("API key not set. Please configure your OpenRouter API key.")
+            ?: throw IllegalStateException("API key not set. Please configure your Hugging Face API key.")
         
         val temperature = preferencesManager.getTemperature()
         
@@ -70,11 +84,9 @@ class OpenRouterApi @Inject constructor(
         )
         
         try {
-            val response = client.post("${Constants.OPENROUTER_BASE_URL}/chat/completions") {
+            val response = client.post("${Constants.HUGGINGFACE_BASE_URL}/chat/completions") {
                 header(HttpHeaders.Authorization, "Bearer $apiKey")
                 header(HttpHeaders.ContentType, ContentType.Application.Json)
-                header("HTTP-Referer", "https://github.com/sandboiii/AgentCooper")
-                header("X-Title", "Agent Cooper")
                 setBody(request)
             }
             
@@ -85,20 +97,9 @@ class OpenRouterApi @Inject constructor(
                 try {
                     val errorResponse = jsonParser.decodeFromString<OpenRouterResponse>(errorBody)
                     errorResponse.error?.let { error ->
-                        if (error.message.contains("data policy", ignoreCase = true) || 
-                            error.message.contains("privacy", ignoreCase = true)) {
-                            throw IllegalStateException("This model is not compatible with your privacy settings. Please configure your privacy settings at https://openrouter.ai/settings/privacy or choose a different model.")
-                        }
                         throw RuntimeException("API error: ${error.message}")
                     }
-                } catch (e: IllegalStateException) {
-                    throw e
                 } catch (e: Exception) {
-                    // If error parsing fails, check raw body
-                    if (errorBody.contains("data policy", ignoreCase = true) || 
-                        errorBody.contains("privacy", ignoreCase = true)) {
-                        throw IllegalStateException("This model is not compatible with your privacy settings. Please configure your privacy settings at https://openrouter.ai/settings/privacy or choose a different model.")
-                    }
                     throw RuntimeException("API error: $errorBody")
                 }
             }
@@ -165,10 +166,6 @@ class OpenRouterApi @Inject constructor(
                         // Check for error first
                         jsonResponse.error?.let { error ->
                             Log.e(TAG, "API error: ${error.message}")
-                            if (error.message.contains("data policy", ignoreCase = true) || 
-                                error.message.contains("privacy", ignoreCase = true)) {
-                                throw IllegalStateException("This model is not compatible with your privacy settings. Please configure your privacy settings at https://openrouter.ai/settings/privacy or choose a different model.")
-                            }
                             throw RuntimeException("API error: ${error.message}")
                         }
                         
@@ -209,10 +206,6 @@ class OpenRouterApi @Inject constructor(
                 // Check for errors first
                 jsonResponse.error?.let { error ->
                     Log.e(TAG, "API error: ${error.message}")
-                    if (error.message.contains("data policy", ignoreCase = true) || 
-                        error.message.contains("privacy", ignoreCase = true)) {
-                        throw IllegalStateException("This model is not compatible with your privacy settings. Please configure your privacy settings at https://openrouter.ai/settings/privacy or choose a different model.")
-                    }
                     throw RuntimeException("API error: ${error.message}")
                 }
                 
@@ -228,13 +221,62 @@ class OpenRouterApi @Inject constructor(
         }
     }
     
+    override suspend fun sendMessageWithUsage(
+        messages: List<ChatMessageDto>,
+        model: String
+    ): MessageResponse {
+        val apiKey = preferencesManager.getApiKey() 
+            ?: throw IllegalStateException("API key not set. Please configure your Hugging Face API key.")
+        
+        val temperature = preferencesManager.getTemperature()
+        
+        val requestMessages = messages.map { 
+            OpenRouterMessage(role = it.role, content = it.content) 
+        }
+        
+        val request = OpenRouterRequest(
+            model = model,
+            messages = requestMessages,
+            stream = false, // Non-streaming to get usage
+            temperature = temperature.toDouble()
+        )
+        
+        try {
+            val response = client.post("${Constants.HUGGINGFACE_BASE_URL}/chat/completions") {
+                header(HttpHeaders.Authorization, "Bearer $apiKey")
+                header(HttpHeaders.ContentType, ContentType.Application.Json)
+                setBody(request)
+            }
+            
+            val jsonResponse = response.body<OpenRouterResponse>()
+            
+            // Check for errors first
+            jsonResponse.error?.let { error ->
+                Log.e(TAG, "API error: ${error.message}")
+                throw RuntimeException("API error: ${error.message}")
+            }
+            
+            val content = jsonResponse.choices?.firstOrNull()?.message?.content ?: ""
+            val usage = jsonResponse.usage
+            
+            return MessageResponse(
+                content = content,
+                promptTokens = usage?.prompt_tokens,
+                completionTokens = usage?.completion_tokens
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send message with usage", e)
+            throw RuntimeException("Failed to send message: ${e.message}", e)
+        }
+    }
+    
     override suspend fun generateTitle(
         userMessage: String,
         aiResponse: String,
         model: String
     ): String {
         val apiKey = preferencesManager.getApiKey()
-            ?: throw IllegalStateException("API key not set. Please configure your OpenRouter API key.")
+            ?: throw IllegalStateException("API key not set. Please configure your Hugging Face API key.")
 
         val temperature = preferencesManager.getTemperature()
 
@@ -262,11 +304,9 @@ class OpenRouterApi @Inject constructor(
 
         return try {
             Log.d(TAG, "Generating title for conversation")
-            val response = client.post("${Constants.OPENROUTER_BASE_URL}/chat/completions") {
+            val response = client.post("${Constants.HUGGINGFACE_BASE_URL}/chat/completions") {
                 header(HttpHeaders.Authorization, "Bearer $apiKey")
                 header(HttpHeaders.ContentType, ContentType.Application.Json)
-                header("HTTP-Referer", "https://github.com/sandboiii/AgentCooper")
-                header("X-Title", "Agent Cooper")
                 setBody(request)
             }
 
@@ -311,30 +351,51 @@ class OpenRouterApi @Inject constructor(
 
     override suspend fun getModels(): List<ModelDto> {
         val apiKey = preferencesManager.getApiKey() 
-            ?: throw IllegalStateException("API key not set. Please configure your OpenRouter API key.")
+            ?: throw IllegalStateException("API key not set. Please configure your Hugging Face API key.")
         
         return try {
-            Log.d(TAG, "Fetching models from OpenRouter API")
-            val response = client.get("${Constants.OPENROUTER_BASE_URL}/models") {
+            Log.d(TAG, "Fetching models from Hugging Face API")
+            val response = client.get("${Constants.HUGGINGFACE_BASE_URL}/models") {
                 header(HttpHeaders.Authorization, "Bearer $apiKey")
             }
             
             val responseBody = response.body<String>()
             Log.d(TAG, "API Response length: ${responseBody.length} characters")
-            Log.d(TAG, "API Response preview: ${responseBody.take(500)}")
+            Log.d(TAG, "API Response preview: ${responseBody.take(3000)}")
             
+            // Check if response contains pricing-related keywords
+            val hasPricingKeyword = responseBody.contains("pricing", ignoreCase = true) ||
+                    responseBody.contains("price", ignoreCase = true) ||
+                    responseBody.contains("cost", ignoreCase = true) ||
+                    responseBody.contains("prompt", ignoreCase = true) ||
+                    responseBody.contains("completion", ignoreCase = true)
+            Log.d(TAG, "Response contains pricing-related keywords: $hasPricingKeyword")
+            
+            // Try to find pricing in the raw response
+            if (hasPricingKeyword) {
+                val pricingMatch = Regex("(?i)\"pricing\"\\s*:\\s*\\{([^}]+)\\}").find(responseBody)
+                if (pricingMatch != null) {
+                    Log.d(TAG, "Found pricing object in response: ${pricingMatch.value}")
+                } else {
+                    Log.d(TAG, "No pricing object found in response despite keywords")
+                }
+            }
+            
+            // Hugging Face uses OpenAI-compatible format: { "data": [...] }
             val modelsResponse = jsonParser.decodeFromString<OpenRouterModelsResponse>(responseBody)
             Log.d(TAG, "Parsed ${modelsResponse.data.size} models")
             
-            // OpenRouter API automatically filters models based on your privacy settings
-            // when you're authenticated with an API key. The /models endpoint respects
-            // your privacy configuration at https://openrouter.ai/settings/privacy
-            // All models returned here should be compatible with your privacy settings.
-            val privacyFilteredModels = modelsResponse.data
+            // Log first model structure to understand the format
+            if (modelsResponse.data.isNotEmpty()) {
+                val firstModel = modelsResponse.data.first()
+                Log.d(TAG, "First model structure - id: ${firstModel.id}, name: ${firstModel.name}")
+                Log.d(TAG, "First model pricing: ${firstModel.pricing}")
+                Log.d(TAG, "First model pricing prompt: ${firstModel.pricing?.prompt}, completion: ${firstModel.pricing?.completion}")
+            }
             
             // Filter to only exclude image and audio generation models
             // Keep all text models, including those that might be good for coding or general chat
-            val chatOnlyModels = privacyFilteredModels.filter { modelData ->
+            val chatOnlyModels = modelsResponse.data.filter { modelData ->
                 val modality = modelData.architecture?.modality?.lowercase()
                 
                 // Only exclude image/audio models based on modality
@@ -345,24 +406,80 @@ class OpenRouterApi @Inject constructor(
                 }
             }
             
-            Log.d(TAG, "Retrieved ${privacyFilteredModels.size} models (filtered by OpenRouter based on privacy settings)")
+            Log.d(TAG, "Retrieved ${modelsResponse.data.size} models from Hugging Face")
             Log.d(TAG, "Filtered to ${chatOnlyModels.size} chat-only models (excluded image/audio models)")
             
             chatOnlyModels.map { modelData ->
                 val providerName = when {
                     !modelData.top_provider?.name.isNullOrBlank() -> modelData.top_provider!!.name!!
                     !modelData.top_provider?.id.isNullOrBlank() -> modelData.top_provider!!.id!!
-                    else -> "unknown"
+                    else -> "Hugging Face"
                 }
                 
-                val pricingInfo = modelData.pricing?.let {
-                    PricingInfo(
-                        prompt = it.prompt,
-                        completion = it.completion
-                    )
+                // Extract pricing information from providers array (Hugging Face format)
+                val pricingInfo = if (modelData.providers != null && modelData.providers.isNotEmpty()) {
+                    // Try to find pricing from providers array
+                    // Prefer the provider that matches top_provider, or use the first one with pricing
+                    val providerWithPricing = modelData.providers.firstOrNull { it.pricing != null }
+                        ?: modelData.providers.firstOrNull()
+                    
+                    providerWithPricing?.pricing?.let { pricing ->
+                        Log.d(TAG, "Model ${modelData.id} - pricing from provider ${providerWithPricing.provider}: input=${pricing.input}, output=${pricing.output}")
+                        
+                        // Convert numeric pricing to string format (e.g., 1.2 -> "1.2" or "$1.2/1M tokens")
+                        val promptPrice = pricing.prompt 
+                            ?: pricing.prompt_price 
+                            ?: pricing.input?.let { formatPrice(it) }
+                            ?: pricing.input_price
+                        
+                        val completionPrice = pricing.completion 
+                            ?: pricing.completion_price 
+                            ?: pricing.output?.let { formatPrice(it) }
+                            ?: pricing.output_price
+                        
+                        if (promptPrice != null || completionPrice != null) {
+                            PricingInfo(
+                                prompt = promptPrice,
+                                completion = completionPrice
+                            )
+                        } else {
+                            Log.d(TAG, "Model ${modelData.id} - provider pricing exists but no price fields found")
+                            null
+                        }
+                    } ?: run {
+                        Log.d(TAG, "Model ${modelData.id} - providers exist but no pricing found")
+                        null
+                    }
+                } else if (modelData.pricing != null) {
+                    // Fallback to direct pricing object (OpenRouter format)
+                    val pricing = modelData.pricing
+                    Log.d(TAG, "Model ${modelData.id} - direct pricing object: prompt=${pricing.prompt}, completion=${pricing.completion}, input=${pricing.input}, output=${pricing.output}")
+                    
+                    val promptPrice = pricing.prompt 
+                        ?: pricing.prompt_price 
+                        ?: pricing.input?.let { formatPrice(it) }
+                        ?: pricing.input_price
+                    
+                    val completionPrice = pricing.completion 
+                        ?: pricing.completion_price 
+                        ?: pricing.output?.let { formatPrice(it) }
+                        ?: pricing.output_price
+                    
+                    if (promptPrice != null || completionPrice != null) {
+                        PricingInfo(
+                            prompt = promptPrice,
+                            completion = completionPrice
+                        )
+                    } else {
+                        Log.d(TAG, "Model ${modelData.id} - pricing object exists but no price fields found")
+                        null
+                    }
+                } else {
+                    Log.d(TAG, "Model ${modelData.id} - no pricing found (no providers or pricing object)")
+                    null
                 }
                 
-                Log.d(TAG, "Model: ${modelData.id}, Name: ${modelData.name}, Provider: $providerName, Pricing: ${pricingInfo?.displayText ?: "unknown"}, Data Policy: ${modelData.data_policy}")
+                Log.d(TAG, "Model: ${modelData.id}, Name: ${modelData.name}, Provider: $providerName, Pricing: ${pricingInfo?.displayText ?: "null"}")
                 
                 ModelDto(
                     id = modelData.id,

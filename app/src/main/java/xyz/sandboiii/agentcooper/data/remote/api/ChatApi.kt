@@ -2,12 +2,27 @@ package xyz.sandboiii.agentcooper.data.remote.api
 
 import kotlinx.coroutines.flow.Flow
 
+data class MessageResponse(
+    val content: String,
+    val promptTokens: Int? = null,
+    val completionTokens: Int? = null
+)
+
 interface ChatApi {
     suspend fun sendMessage(
         messages: List<ChatMessageDto>,
         model: String,
         stream: Boolean = true
     ): Flow<String>
+    
+    /**
+     * Sends a message and returns both content and token usage information.
+     * This is used for non-streaming requests to get usage data.
+     */
+    suspend fun sendMessageWithUsage(
+        messages: List<ChatMessageDto>,
+        model: String
+    ): MessageResponse
     
     suspend fun getModels(): List<ModelDto>
     

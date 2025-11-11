@@ -16,6 +16,7 @@ data class ModelData(
     val architecture: Architecture? = null,
     val top_provider: Provider? = null,
     val pricing: Pricing? = null,
+    val providers: List<ProviderInfo>? = null, // Hugging Face nests pricing in providers array
     val moderation: Boolean? = null,
     val context_length_display: String? = null,
     val supports_streaming: Boolean? = null,
@@ -40,6 +41,22 @@ data class Provider(
 @Serializable
 data class Pricing(
     val prompt: String? = null,
-    val completion: String? = null
+    val completion: String? = null,
+    // Alternative field names that Hugging Face might use
+    val input: Double? = null, // Hugging Face uses numbers, not strings
+    val output: Double? = null, // Hugging Face uses numbers, not strings
+    val prompt_price: String? = null,
+    val completion_price: String? = null,
+    val input_price: String? = null,
+    val output_price: String? = null
+)
+
+@Serializable
+data class ProviderInfo(
+    val provider: String? = null,
+    val status: String? = null,
+    val context_length: Int? = null,
+    val pricing: Pricing? = null,
+    val is_model_author: Boolean? = null
 )
 
