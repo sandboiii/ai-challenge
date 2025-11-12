@@ -2,6 +2,7 @@
 
 Задание каждого дня вынесено в отдельную ветку и ветки будут добавляться по мере прохождения челленджа:
 
+[**День 7**](https://github.com/sandboiii/ai-challenge/tree/day-7)  
 [**День 6**](https://github.com/sandboiii/ai-challenge/tree/day-6)  
 [**День 5**](https://github.com/sandboiii/ai-challenge/tree/day-5)  
 [**День 4**](https://github.com/sandboiii/ai-challenge/tree/day-4)  
