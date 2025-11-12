@@ -24,9 +24,6 @@ class SettingsViewModel @Inject constructor(
     private val _systemPrompt = MutableStateFlow<String>("")
     val systemPrompt: StateFlow<String> = _systemPrompt.asStateFlow()
     
-    private val _suggestionsEnabled = MutableStateFlow(false)
-    val suggestionsEnabled: StateFlow<Boolean> = _suggestionsEnabled.asStateFlow()
-    
     private val _welcomeMessageEnabled = MutableStateFlow(true)
     val welcomeMessageEnabled: StateFlow<Boolean> = _welcomeMessageEnabled.asStateFlow()
     
@@ -51,7 +48,6 @@ class SettingsViewModel @Inject constructor(
     init {
         loadApiKey()
         loadSystemPrompt()
-        loadSuggestionsEnabled()
         loadWelcomeMessageEnabled()
     }
     
@@ -166,29 +162,6 @@ class SettingsViewModel @Inject constructor(
     
     fun clearDeleteSessionsSuccess() {
         _deleteSessionsSuccess.value = false
-    }
-    
-    private fun loadSuggestionsEnabled() {
-        viewModelScope.launch {
-            try {
-                val enabled = preferencesManager.getSuggestionsEnabled()
-                _suggestionsEnabled.value = enabled
-            } catch (e: Exception) {
-                _errorMessage.value = "Ошибка загрузки настроек предложений: ${e.message}"
-                _suggestionsEnabled.value = false
-            }
-        }
-    }
-    
-    fun updateSuggestionsEnabled(enabled: Boolean) {
-        viewModelScope.launch {
-            try {
-                preferencesManager.setSuggestionsEnabled(enabled)
-                _suggestionsEnabled.value = enabled
-            } catch (e: Exception) {
-                _errorMessage.value = "Ошибка сохранения настроек предложений: ${e.message}"
-            }
-        }
     }
     
     private fun loadWelcomeMessageEnabled() {

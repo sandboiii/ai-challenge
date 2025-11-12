@@ -48,6 +48,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -69,37 +70,24 @@ fun ChatScreen(
     onNavigateBack: () -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel()
 ) {
-    // Get title based on session ID
-    val screenTitle = remember(sessionId) {
-        when (sessionId) {
-            Constants.LOGICAL_CHAT_DIRECT_ID -> "Прямое решение"
-            Constants.LOGICAL_CHAT_STEP_BY_STEP_ID -> "Пошаговое решение"
-            Constants.LOGICAL_CHAT_PROMPT_WRITER_ID -> "Создатель промптов"
-            Constants.LOGICAL_CHAT_EXPERTS_ID -> "Команда экспертов"
-            else -> "Agent Cooper"
-        }
-    }
-    
-    // Check if this is a logical problem chat
-    val isLogicalProblemChat = remember(sessionId) {
-        sessionId == Constants.LOGICAL_CHAT_DIRECT_ID ||
-        sessionId == Constants.LOGICAL_CHAT_STEP_BY_STEP_ID ||
-        sessionId == Constants.LOGICAL_CHAT_PROMPT_WRITER_ID ||
-        sessionId == Constants.LOGICAL_CHAT_EXPERTS_ID
-    }
-    
-    // Confirmation dialog state
-    var showClearDialog by remember { mutableStateOf(false) }
     LaunchedEffect(sessionId, modelId) {
         viewModel.initialize(sessionId, modelId)
     }
     
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val state by viewModel.state.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = ChatState.Loading)
+    val modelInfo by viewModel.modelInfo.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = null)
     val welcomeMessageEnabled by viewModel.welcomeMessageEnabled.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = true)
     var messageText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
     var isInputFocused by remember { mutableStateOf(false) }
+    
+    // Build title with model information
+    val screenTitle = remember(modelInfo) {
+        val modelName = modelInfo?.name ?: "Agent Cooper"
+        val contextInfo = modelInfo?.contextLengthDisplay?.let { " ($it)" } ?: ""
+        "$modelName$contextInfo"
+    }
     
     // Helper function to scroll to bottom edge
     suspend fun scrollToBottomEdge(filteredMessages: List<*>) {
@@ -193,23 +181,19 @@ fun ChatScreen(
         topBar = {
             @OptIn(ExperimentalMaterial3Api::class)
             TopAppBar(
-                title = { Text(screenTitle) },
+                title = { 
+                    Text(
+                        text = screenTitle,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(
                             imageVector = Icons.Default.ArrowBack,
                             contentDescription = "Назад"
                         )
-                    }
-                },
-                actions = {
-                    if (isLogicalProblemChat) {
-                        IconButton(onClick = { showClearDialog = true }) {
-                            Icon(
-                                imageVector = Icons.Default.Delete,
-                                contentDescription = "Очистить чат"
-                            )
-                        }
                     }
                 }
             )
@@ -280,10 +264,7 @@ fun ChatScreen(
                             MessageBubble(
                                 message = message,
                                 isStreaming = currentState.isStreaming &&
-                                        message.id == "streaming",
-                                onSuggestionClick = { suggestion ->
-                                    viewModel.handleIntent(ChatIntent.SendMessage(suggestion))
-                                }
+                                        message.id == "streaming"
                             )
                         }
                         
@@ -332,52 +313,14 @@ fun ChatScreen(
             }
         }
     }
-    
-    // Clear messages confirmation dialog
-    if (showClearDialog) {
-        AlertDialog(
-            onDismissRequest = { showClearDialog = false },
-            title = {
-                Text("Очистить чат")
-            },
-            text = {
-                Text("Вы уверены, что хотите удалить все сообщения в этом чате? Это действие нельзя отменить.")
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        viewModel.handleIntent(ChatIntent.ClearMessages)
-                        showClearDialog = false
-                    },
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error
-                    )
-                ) {
-                    Text("Очистить")
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { showClearDialog = false },
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.onSurface
-                    )
-                ) {
-                    Text("Отмена")
-                }
-            }
-        )
-    }
 }
 
 @Composable
 fun MessageBubble(
     message: xyz.sandboiii.agentcooper.domain.model.ChatMessage,
-    isStreaming: Boolean,
-    onSuggestionClick: (String) -> Unit = {}
+    isStreaming: Boolean
 ) {
     val isUser = message.role == MessageRole.USER
-    var showJsonDialog by remember { mutableStateOf(false) }
     
     val slideIn = remember {
         slideInHorizontally(
@@ -419,22 +362,6 @@ fun MessageBubble(
                     tonalElevation = 2.dp
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        // Show mood if available - make it bigger and more visible
-                        if (!isUser && message.mood != null && !isStreaming) {
-                            Text(
-                                text = message.mood,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = if (isUser) {
-                                    Color.White
-                                } else {
-                                    // Use onSurface for contrast on surfaceVariant background
-                                    MaterialTheme.colorScheme.onSurface
-                                },
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(bottom = 8.dp)
-                            )
-                        }
-                        
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.fillMaxWidth()
@@ -480,121 +407,91 @@ fun MessageBubble(
                             }
                         }
                         
-                        // Show JSON button if raw JSON is available
-                        if (!isUser && !isStreaming && message.rawJson != null) {
+                        // Show response metadata for assistant messages
+                        if (!isUser && !isStreaming && (
+                            message.modelId != null ||
+                            message.responseTimeMs != null ||
+                            message.promptTokens != null ||
+                            message.completionTokens != null ||
+                            message.contextWindowUsedPercent != null ||
+                            message.totalCost != null
+                        )) {
                             Spacer(modifier = Modifier.height(8.dp))
-                            TextButton(
-                                onClick = { showJsonDialog = true },
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                colors = ButtonDefaults.textButtonColors(
-                                    contentColor = MaterialTheme.colorScheme.onSurface
-                                )
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Code,
-                                    contentDescription = "Показать JSON",
-                                    modifier = Modifier.size(16.dp),
-                                    tint = MaterialTheme.colorScheme.onSurface
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "Показать JSON",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
+                                // Model name - try to get display name, fallback to ID
+                                message.modelId?.let { modelId ->
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(
+                                            text = "Модель:",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = modelId, // Will display model ID, could be enhanced to show name
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            fontWeight = FontWeight.Medium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                                
+                                // Response time, tokens, and context window usage
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    message.responseTimeMs?.let { timeMs ->
+                                        Text(
+                                            text = "${timeMs}ms",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    
+                                    if (message.promptTokens != null || message.completionTokens != null) {
+                                        val promptText = message.promptTokens?.toString() ?: "?"
+                                        val completionText = message.completionTokens?.toString() ?: "?"
+                                        Text(
+                                            text = "Токены: $promptText/$completionText",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    
+                                    message.contextWindowUsedPercent?.let { percent ->
+                                        Text(
+                                            text = String.format("%.1f%%", percent),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                
+                                // Price on separate line
+                                message.totalCost?.let { cost ->
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = String.format("Стоимость: $%.6f", cost),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
-            
-            // Show suggestion buttons for assistant messages (not streaming)
-            if (!isUser && !isStreaming && message.suggestions.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = if (isUser) 0.dp else 16.dp, end = if (isUser) 16.dp else 0.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    // Each suggestion on a separate line
-                    message.suggestions.forEach { suggestion ->
-                        SuggestionButton(
-                            text = suggestion,
-                            onClick = { onSuggestionClick(suggestion) },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                }
-            }
         }
-    }
-    
-    // JSON Dialog
-    if (showJsonDialog && message.rawJson != null) {
-        AlertDialog(
-            onDismissRequest = { showJsonDialog = false },
-            title = {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Raw JSON")
-                    IconButton(
-                        onClick = { showJsonDialog = false },
-                        modifier = Modifier.size(24.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Закрыть",
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
-            },
-            text = {
-                Column {
-                    Text(
-                        text = message.rawJson,
-                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .verticalScroll(rememberScrollState())
-                            .padding(8.dp)
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showJsonDialog = false }) {
-                    Text("Закрыть")
-                }
-            }
-        )
-    }
-}
-
-@Composable
-fun SuggestionButton(
-    text: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    OutlinedButton(
-        onClick = onClick,
-        modifier = modifier,
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-        shape = RoundedCornerShape(16.dp),
-        colors = ButtonDefaults.outlinedButtonColors(
-            contentColor = MaterialTheme.colorScheme.onSurface
-        )
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface,
-            textAlign = TextAlign.Start
-        )
     }
 }
 

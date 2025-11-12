@@ -15,6 +15,7 @@ import java.util.UUID
 import xyz.sandboiii.agentcooper.domain.model.ChatMessage
 import xyz.sandboiii.agentcooper.domain.model.MessageRole
 import xyz.sandboiii.agentcooper.domain.repository.ChatRepository
+import xyz.sandboiii.agentcooper.data.remote.api.ChatApi
 import xyz.sandboiii.agentcooper.domain.usecase.GetMessagesUseCase
 import xyz.sandboiii.agentcooper.domain.usecase.SendMessageUseCase
 import xyz.sandboiii.agentcooper.util.PreferencesManager
@@ -25,7 +26,8 @@ class ChatViewModel @Inject constructor(
     private val sendMessageUseCase: SendMessageUseCase,
     private val getMessagesUseCase: GetMessagesUseCase,
     private val chatRepository: ChatRepository,
-    private val preferencesManager: PreferencesManager
+    private val preferencesManager: PreferencesManager,
+    private val chatApi: ChatApi
 ) : ViewModel() {
     
     companion object {
@@ -35,15 +37,62 @@ class ChatViewModel @Inject constructor(
     private val _state = MutableStateFlow<ChatState>(ChatState.Loading)
     val state: StateFlow<ChatState> = _state.asStateFlow()
     
+    private val _modelInfo = MutableStateFlow<ModelInfo?>(null)
+    val modelInfo: StateFlow<ModelInfo?> = _modelInfo.asStateFlow()
+    
     val welcomeMessageEnabled = preferencesManager.welcomeMessageEnabled
     
     private var currentSessionId: String? = null
     private var currentModelId: String? = null
     
+    data class ModelInfo(
+        val name: String,
+        val contextLengthDisplay: String?
+    )
+    
     fun initialize(sessionId: String, modelId: String) {
         currentSessionId = sessionId
         currentModelId = modelId
+        loadModelInfo(modelId)
         handleIntent(ChatIntent.LoadMessages)
+    }
+    
+    private fun loadModelInfo(modelId: String) {
+        viewModelScope.launch {
+            try {
+                val models = chatApi.getModels()
+                val model = models.find { it.id == modelId }
+                if (model != null) {
+                    val contextDisplay = model.contextLengthDisplay ?: 
+                        model.contextLength?.let { formatContextLength(it) }
+                    _modelInfo.value = ModelInfo(
+                        name = model.name,
+                        contextLengthDisplay = contextDisplay
+                    )
+                } else {
+                    // Fallback to modelId if not found
+                    _modelInfo.value = ModelInfo(
+                        name = modelId,
+                        contextLengthDisplay = null
+                    )
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to load model info", e)
+                // Fallback to modelId
+                _modelInfo.value = ModelInfo(
+                    name = modelId,
+                    contextLengthDisplay = null
+                )
+            }
+        }
+    }
+    
+    private fun formatContextLength(contextLength: Int): String {
+        return when {
+            contextLength >= 1_000_000 -> "${contextLength / 1_000_000}M"
+            contextLength >= 1_000 -> "${contextLength / 1_000}K"
+            else -> contextLength.toString()
+        }
     }
     
     fun handleIntent(intent: ChatIntent) {

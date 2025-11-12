@@ -36,7 +36,6 @@ fun SettingsScreen(
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val apiKey by viewModel.apiKey.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = "")
     val systemPrompt by viewModel.systemPrompt.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = "")
-    val suggestionsEnabled by viewModel.suggestionsEnabled.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
     val welcomeMessageEnabled by viewModel.welcomeMessageEnabled.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = true)
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
     val saveSuccess by viewModel.saveSuccess.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
@@ -340,50 +339,6 @@ fun SettingsScreen(
                                 color = Color.White
                             )
                         }
-                    }
-                }
-            }
-            
-            // Suggestions Toggle Section
-            Card(
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(
-                                text = "Предложения ответов",
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                            
-                            Text(
-                                text = "Включить автоматические предложения ответов на сообщения AI",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        
-                        Switch(
-                            checked = suggestionsEnabled,
-                            onCheckedChange = { viewModel.updateSuggestionsEnabled(it) },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = Color(0xFF6200EE), // Use the same purple as buttons
-                                uncheckedThumbColor = Color(0xFF757575), // Dark gray for visibility
-                                uncheckedTrackColor = Color(0xFFE0E0E0) // Light gray with contrast
-                            )
-                        )
                     }
                 }
             }

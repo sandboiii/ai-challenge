@@ -6,9 +6,12 @@ data class ChatMessage(
     val role: MessageRole,
     val timestamp: Long,
     val sessionId: String,
-    val mood: String? = null,
-    val suggestions: List<String> = emptyList(),
-    val rawJson: String? = null
+    val modelId: String? = null, // Which AI model was used
+    val responseTimeMs: Long? = null, // Response time in milliseconds
+    val promptTokens: Int? = null, // Number of prompt tokens
+    val completionTokens: Int? = null, // Number of completion tokens
+    val contextWindowUsedPercent: Double? = null, // Percentage of context window used
+    val totalCost: Double? = null // Total cost in dollars
 )
 
 enum class MessageRole {

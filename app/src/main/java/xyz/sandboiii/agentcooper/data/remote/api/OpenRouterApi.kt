@@ -51,7 +51,8 @@ class OpenRouterApi @Inject constructor(
     override suspend fun sendMessage(
         messages: List<ChatMessageDto>,
         model: String,
-        stream: Boolean
+        stream: Boolean,
+        onMetadata: ((MessageMetadata) -> Unit)?
     ): Flow<String> = flow {
         val apiKey = preferencesManager.getApiKey() 
             ?: throw IllegalStateException("API key not set. Please configure your OpenRouter API key.")
@@ -111,6 +112,8 @@ class OpenRouterApi @Inject constructor(
                 Log.d(TAG, "Response preview: ${body.take(1000)}")
                 
                 var hasReceivedData = false
+                var lastResponseModel: String? = null
+                var lastUsage: Usage? = null
                 
                 // First, try to parse as SSE format (lines starting with "data: ")
                 val lines = body.lines()
@@ -122,12 +125,31 @@ class OpenRouterApi @Inject constructor(
                         val data = line.removePrefix("data: ").trim()
                         if (data == "[DONE]") {
                             Log.d(TAG, "Received [DONE] signal")
+                            // Always invoke metadata callback if we have any information, even if usage is null
+                            // This ensures the callback is called so cost calculation can proceed
+                            onMetadata?.invoke(MessageMetadata(
+                                modelId = lastResponseModel,
+                                promptTokens = lastUsage?.prompt_tokens,
+                                completionTokens = lastUsage?.completion_tokens,
+                                totalTokens = lastUsage?.total_tokens
+                            ))
+                            Log.d(TAG, "Invoked metadata callback: model=$lastResponseModel, usage=$lastUsage")
                             break
                         }
                         
                         if (data.isNotEmpty()) {
                             try {
                                 val jsonResponse = jsonParser.decodeFromString<OpenRouterResponse>(data)
+                                
+                                // Capture model and usage from response (always capture, even if no content)
+                                if (jsonResponse.model != null) {
+                                    lastResponseModel = jsonResponse.model
+                                    Log.d(TAG, "Captured model: ${jsonResponse.model}")
+                                }
+                                if (jsonResponse.usage != null) {
+                                    lastUsage = jsonResponse.usage
+                                    Log.d(TAG, "Captured usage: prompt=${jsonResponse.usage.prompt_tokens}, completion=${jsonResponse.usage.completion_tokens}, total=${jsonResponse.usage.total_tokens}")
+                                }
                                 
                                 // Try delta first (for streaming chunks)
                                 val deltaContent = jsonResponse.choices?.firstOrNull()?.delta?.content
@@ -142,6 +164,9 @@ class OpenRouterApi @Inject constructor(
                                         Log.d(TAG, "Emitting complete message from SSE (length: ${messageContent.length}): ${messageContent.take(50)}...")
                                         emit(messageContent)
                                         hasReceivedData = true
+                                    } else if (jsonResponse.usage != null) {
+                                        // If there's usage info but no content, this might be a final metadata-only message
+                                        Log.d(TAG, "Received metadata-only message with usage info")
                                     }
                                 }
                             } catch (e: Exception) {
@@ -153,6 +178,30 @@ class OpenRouterApi @Inject constructor(
                         val errorData = line.removePrefix("error:").trim()
                         Log.e(TAG, "Server error: $errorData")
                         throw RuntimeException("Server error: $errorData")
+                    }
+                }
+                
+                // If we didn't get metadata before [DONE], try to extract it from the last valid response
+                if (lastResponseModel == null && lastUsage == null && foundSSEFormat) {
+                    // Parse the last data line before [DONE] again to get usage
+                    val lastDataLine = lines.lastOrNull { it.startsWith("data: ") && !it.contains("[DONE]") }
+                    lastDataLine?.let { line ->
+                        val data = line.removePrefix("data: ").trim()
+                        if (data.isNotEmpty()) {
+                            try {
+                                val jsonResponse = jsonParser.decodeFromString<OpenRouterResponse>(data)
+                                if (jsonResponse.model != null) lastResponseModel = jsonResponse.model
+                                if (jsonResponse.usage != null) lastUsage = jsonResponse.usage
+                                onMetadata?.invoke(MessageMetadata(
+                                    modelId = lastResponseModel,
+                                    promptTokens = lastUsage?.prompt_tokens,
+                                    completionTokens = lastUsage?.completion_tokens,
+                                    totalTokens = lastUsage?.total_tokens
+                                ))
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Failed to extract metadata from last line", e)
+                            }
+                        }
                     }
                 }
                 
@@ -170,6 +219,16 @@ class OpenRouterApi @Inject constructor(
                                 throw IllegalStateException("This model is not compatible with your privacy settings. Please configure your privacy settings at https://openrouter.ai/settings/privacy or choose a different model.")
                             }
                             throw RuntimeException("API error: ${error.message}")
+                        }
+                        
+                        // Extract metadata
+                        if (jsonResponse.model != null || jsonResponse.usage != null) {
+                            onMetadata?.invoke(MessageMetadata(
+                                modelId = jsonResponse.model,
+                                promptTokens = jsonResponse.usage?.prompt_tokens,
+                                completionTokens = jsonResponse.usage?.completion_tokens,
+                                totalTokens = jsonResponse.usage?.total_tokens
+                            ))
                         }
                         
                         // Try message field first (complete response)
@@ -214,6 +273,16 @@ class OpenRouterApi @Inject constructor(
                         throw IllegalStateException("This model is not compatible with your privacy settings. Please configure your privacy settings at https://openrouter.ai/settings/privacy or choose a different model.")
                     }
                     throw RuntimeException("API error: ${error.message}")
+                }
+                
+                // Extract metadata from non-streaming response
+                if (jsonResponse.model != null || jsonResponse.usage != null) {
+                    onMetadata?.invoke(MessageMetadata(
+                        modelId = jsonResponse.model,
+                        promptTokens = jsonResponse.usage?.prompt_tokens,
+                        completionTokens = jsonResponse.usage?.completion_tokens,
+                        totalTokens = jsonResponse.usage?.total_tokens
+                    ))
                 }
                 
                 jsonResponse.choices?.firstOrNull()?.message?.content?.let { content ->
@@ -362,14 +431,16 @@ class OpenRouterApi @Inject constructor(
                     )
                 }
                 
-                Log.d(TAG, "Model: ${modelData.id}, Name: ${modelData.name}, Provider: $providerName, Pricing: ${pricingInfo?.displayText ?: "unknown"}, Data Policy: ${modelData.data_policy}")
+                Log.d(TAG, "Model: ${modelData.id}, Name: ${modelData.name}, Provider: $providerName, Pricing: ${pricingInfo?.displayText ?: "unknown"}, Data Policy: ${modelData.data_policy}, Context Length: ${modelData.context_length}, Context Length Display: ${modelData.context_length_display}")
                 
                 ModelDto(
                     id = modelData.id,
                     name = modelData.name ?: modelData.id,
                     provider = providerName,
                     description = modelData.description,
-                    pricing = pricingInfo
+                    pricing = pricingInfo,
+                    contextLength = modelData.context_length,
+                    contextLengthDisplay = modelData.context_length_display
                 )
             }
         } catch (e: Exception) {

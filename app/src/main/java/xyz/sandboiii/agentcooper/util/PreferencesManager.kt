@@ -21,7 +21,6 @@ class PreferencesManager @Inject constructor(
         private val SELECTED_MODEL = stringPreferencesKey(Constants.PREF_SELECTED_MODEL)
         const val DEFAULT_API_KEY = "INSERT_YOUR_KEY"
         private val SYSTEM_PROMPT = stringPreferencesKey(Constants.PREF_SYSTEM_PROMPT)
-        private val SUGGESTIONS_ENABLED = booleanPreferencesKey(Constants.PREF_SUGGESTIONS_ENABLED)
         private val WELCOME_MESSAGE_ENABLED = booleanPreferencesKey(Constants.PREF_WELCOME_MESSAGE_ENABLED)
         private val TEMPERATURE = floatPreferencesKey(Constants.PREF_TEMPERATURE)
     }
@@ -29,7 +28,6 @@ class PreferencesManager @Inject constructor(
     val apiKey: Flow<String?> = dataStore.data.map { it[API_KEY] }
     val selectedModel: Flow<String?> = dataStore.data.map { it[SELECTED_MODEL] }
     val systemPrompt: Flow<String?> = dataStore.data.map { it[SYSTEM_PROMPT] }
-    val suggestionsEnabled: Flow<Boolean> = dataStore.data.map { it[SUGGESTIONS_ENABLED] ?: false }
     val welcomeMessageEnabled: Flow<Boolean> = dataStore.data.map { it[WELCOME_MESSAGE_ENABLED] ?: true }
     val temperature: Flow<Float> = dataStore.data.map { it[TEMPERATURE] ?: Constants.DEFAULT_TEMPERATURE }
     
@@ -47,14 +45,6 @@ class PreferencesManager @Inject constructor(
     
     suspend fun getSystemPrompt(): String? {
         return dataStore.data.first()[SYSTEM_PROMPT]
-    }
-    
-    suspend fun setSuggestionsEnabled(enabled: Boolean) {
-        dataStore.edit { it[SUGGESTIONS_ENABLED] = enabled }
-    }
-    
-    suspend fun getSuggestionsEnabled(): Boolean {
-        return dataStore.data.first()[SUGGESTIONS_ENABLED] ?: false
     }
     
     suspend fun setWelcomeMessageEnabled(enabled: Boolean) {

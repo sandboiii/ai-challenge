@@ -28,7 +28,6 @@ fun SessionsScreen(
     onSessionClick: (String, String) -> Unit,
     onNavigateToModelSelection: () -> Unit = {},
     onNavigateToSettings: () -> Unit = {},
-    onNavigateToLogicalProblem: () -> Unit = {},
     viewModel: SessionsViewModel = hiltViewModel()
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -51,12 +50,6 @@ fun SessionsScreen(
             TopAppBar(
                 title = { Text("Сессии") },
                 actions = {
-                    IconButton(onClick = onNavigateToLogicalProblem) {
-                        Icon(
-                            imageVector = Icons.Default.Settings, // Using Settings icon as placeholder, can be changed
-                            contentDescription = "Логические задачи"
-                        )
-                    }
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(
                             imageVector = Icons.Default.Tune,

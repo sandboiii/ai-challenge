@@ -4,15 +4,11 @@ import android.util.Log
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.decodeFromString
 import java.util.UUID
 import xyz.sandboiii.agentcooper.data.local.database.AppDatabase
 import xyz.sandboiii.agentcooper.data.local.entity.ChatMessageEntity
 import xyz.sandboiii.agentcooper.data.remote.api.ChatApi
 import xyz.sandboiii.agentcooper.data.remote.api.ChatMessageDto
-import xyz.sandboiii.agentcooper.data.remote.dto.AiResponseDto
 import xyz.sandboiii.agentcooper.domain.model.ChatMessage
 import xyz.sandboiii.agentcooper.domain.model.MessageRole
 import xyz.sandboiii.agentcooper.domain.repository.ChatRepository
@@ -63,22 +59,8 @@ class ChatRepositoryImpl @Inject constructor(
         )
         database.chatMessageDao().insertMessage(userMessage)
         
-        // Check if suggestions are enabled
-        val suggestionsEnabled = preferencesManager.getSuggestionsEnabled()
-        
-        // Get system prompt - check if this is a logical problem chat first
-        var systemPrompt = when (sessionId) {
-            Constants.LOGICAL_CHAT_DIRECT_ID -> Constants.LOGICAL_CHAT_DIRECT_PROMPT
-            Constants.LOGICAL_CHAT_STEP_BY_STEP_ID -> Constants.LOGICAL_CHAT_STEP_BY_STEP_PROMPT
-            Constants.LOGICAL_CHAT_PROMPT_WRITER_ID -> Constants.LOGICAL_CHAT_PROMPT_WRITER_PROMPT
-            Constants.LOGICAL_CHAT_EXPERTS_ID -> Constants.LOGICAL_CHAT_EXPERTS_PROMPT
-            else -> preferencesManager.getSystemPrompt() ?: Constants.DEFAULT_SYSTEM_PROMPT
-        }
-        
-        // If suggestions are enabled, append JSON format instructions to system prompt
-        if (suggestionsEnabled) {
-            systemPrompt += "\n\n${Constants.JSON_FORMAT_INSTRUCTION}"
-        }
+        // Get system prompt
+        val systemPrompt = preferencesManager.getSystemPrompt() ?: Constants.DEFAULT_SYSTEM_PROMPT
         
         val messages = mutableListOf<ChatMessageDto>().apply {
             // Add system prompt as first message
@@ -107,9 +89,28 @@ class ChatRepositoryImpl @Inject constructor(
         val assistantMessageId = UUID.randomUUID().toString()
         var accumulatedContent = ""
         
-        // Stream response from API
+        // Track response time and metadata
+        val startTime = System.currentTimeMillis()
+        var responseModelId: String? = null
+        var promptTokens: Int? = null
+        var completionTokens: Int? = null
+        var totalTokens: Int? = null
+        
+        // Stream response from API with metadata callback
         try {
-            chatApi.sendMessage(messages, modelId, stream = true).collect { chunk ->
+            chatApi.sendMessage(
+                messages, 
+                modelId, 
+                stream = true,
+                onMetadata = { metadata ->
+                    Log.d(TAG, "Metadata callback invoked: model=${metadata.modelId}, prompt=${metadata.promptTokens}, completion=${metadata.completionTokens}, total=${metadata.totalTokens}")
+                    responseModelId = metadata.modelId ?: modelId
+                    promptTokens = metadata.promptTokens
+                    completionTokens = metadata.completionTokens
+                    totalTokens = metadata.totalTokens
+                    Log.d(TAG, "Updated token variables: prompt=$promptTokens, completion=$completionTokens, total=$totalTokens")
+                }
+            ).collect { chunk ->
                 accumulatedContent += chunk
                 emit(chunk)
             }
@@ -118,54 +119,118 @@ class ChatRepositoryImpl @Inject constructor(
             throw e
         }
         
-        // Parse JSON response if suggestions are enabled
-        var messageContent = accumulatedContent
-        var mood: String? = null
-        var suggestions: List<String> = emptyList()
+        val responseTimeMs = System.currentTimeMillis() - startTime
         
-        if (suggestionsEnabled) {
-            try {
-                // Try to parse as JSON
-                val json = Json { ignoreUnknownKeys = true; isLenient = true }
-                // Clean the content - remove markdown code blocks if present
-                var cleanedContent = accumulatedContent.trim()
-                if (cleanedContent.startsWith("```json")) {
-                    cleanedContent = cleanedContent.removePrefix("```json").trim()
-                }
-                if (cleanedContent.startsWith("```")) {
-                    cleanedContent = cleanedContent.removePrefix("```").trim()
-                }
-                if (cleanedContent.endsWith("```")) {
-                    cleanedContent = cleanedContent.removeSuffix("```").trim()
-                }
-                
-                val aiResponse = json.decodeFromString<AiResponseDto>(cleanedContent)
-                messageContent = aiResponse.message
-                mood = aiResponse.mood
-                suggestions = aiResponse.suggestions
-                Log.d(TAG, "Parsed JSON response: mood=$mood, suggestions=${suggestions.size}")
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to parse JSON response, using raw content", e)
-                // If parsing fails, use the raw content as message
-                messageContent = accumulatedContent
+        // Use accumulated content as message
+        val messageContent = accumulatedContent
+        
+        // Log final token values before cost calculation
+        Log.d(TAG, "Before cost calculation - Final token values: prompt=$promptTokens, completion=$completionTokens, total=$totalTokens, modelId=${responseModelId ?: modelId}")
+        
+        // Calculate cost and context window usage
+        var totalCost: Double? = null
+        var contextWindowUsedPercent: Double? = null
+        
+        try {
+            val models = chatApi.getModels()
+            val lookupModelId = responseModelId ?: modelId
+            val model = models.find { it.id == lookupModelId }
+            
+            Log.d(TAG, "Looking up model for cost calculation: $lookupModelId")
+            Log.d(TAG, "Token usage: prompt=$promptTokens, completion=$completionTokens, total=$totalTokens")
+            
+            if (model == null) {
+                Log.w(TAG, "Model not found in models list: $lookupModelId")
+                Log.w(TAG, "Available model IDs (first 10): ${models.take(10).map { it.id }}")
             }
+            
+            model?.let { modelInfo ->
+                Log.d(TAG, "Found model: ${modelInfo.name}, pricing: ${modelInfo.pricing?.displayText ?: "null"}")
+                
+                // Calculate cost if model is paid
+                modelInfo.pricing?.let { pricing ->
+                    Log.d(TAG, "Pricing details: prompt=${pricing.prompt}, completion=${pricing.completion}, isFree=${pricing.isFree}")
+                    
+                    // Parse pricing values - OpenRouter pricing is per token (not per million)
+                    // According to https://openrouter.ai/docs/overview/models: "All pricing values are in USD per token"
+                    val promptPricePerToken = pricing.prompt?.let { 
+                        val parsed = it.toDoubleOrNull()
+                        Log.d(TAG, "Parsing prompt price per token: '$it' -> $parsed")
+                        parsed
+                    } ?: 0.0
+                    val completionPricePerToken = pricing.completion?.let {
+                        val parsed = it.toDoubleOrNull()
+                        Log.d(TAG, "Parsing completion price per token: '$it' -> $parsed")
+                        parsed
+                    } ?: 0.0
+                    
+                    // Model is paid if either price is > 0 (regardless of isFree flag, as some models might have incorrect isFree)
+                    val isActuallyPaid = promptPricePerToken > 0.0 || completionPricePerToken > 0.0
+                    
+                    Log.d(TAG, "Price per token: prompt=$promptPricePerToken, completion=$completionPricePerToken, isActuallyPaid=$isActuallyPaid, isFree=${pricing.isFree}")
+                    
+                    // Calculate cost if we have tokens and pricing
+                    if (promptTokens != null && completionTokens != null && (promptTokens!! > 0 || completionTokens!! > 0)) {
+                        if (isActuallyPaid) {
+                            // Calculate cost: tokens * price_per_token (OpenRouter pricing is per token, not per million)
+                            val promptCost = promptTokens!! * promptPricePerToken
+                            val completionCost = completionTokens!! * completionPricePerToken
+                            totalCost = promptCost + completionCost
+                            
+                            Log.d(TAG, "Cost breakdown: promptCost=$promptCost (${promptTokens} tokens * $promptPricePerToken), completionCost=$completionCost (${completionTokens} tokens * $completionPricePerToken), total=$totalCost")
+                            
+                            // Verify calculation - log error if cost is unexpectedly zero
+                            totalCost?.let { cost ->
+                                if (cost == 0.0 && (promptTokens!! > 0 || completionTokens!! > 0) && (promptPricePerToken > 0.0 || completionPricePerToken > 0.0)) {
+                                    Log.e(TAG, "ERROR: Cost is zero but should not be! promptTokens=$promptTokens, completionTokens=$completionTokens, promptPrice=$promptPricePerToken, completionPrice=$completionPricePerToken")
+                                }
+                            }
+                        } else {
+                            Log.d(TAG, "Model is free (both prices are 0 or null), skipping cost calculation")
+                        }
+                    } else {
+                        Log.d(TAG, "Skipping cost calculation: promptTokens=$promptTokens, completionTokens=$completionTokens")
+                    }
+                } ?: Log.w(TAG, "Model has no pricing information")
+                
+                // Calculate context window usage percentage
+                totalTokens?.let { tokens ->
+                    val actualContextLength = modelInfo.contextLength ?: run {
+                        // Fallback to default context window sizes for common models
+                        when {
+                            modelInfo.id.contains("gpt-4", ignoreCase = true) -> 128000
+                            modelInfo.id.contains("gpt-3.5", ignoreCase = true) -> 16385
+                            modelInfo.id.contains("claude", ignoreCase = true) -> 200000
+                            modelInfo.id.contains("llama", ignoreCase = true) -> 4096
+                            else -> null // Unknown, can't calculate percentage
+                        }
+                    }
+                    
+                    actualContextLength?.let { ctxLength ->
+                        if (ctxLength > 0) {
+                            contextWindowUsedPercent = (tokens.toDouble() / ctxLength) * 100.0
+                            Log.d(TAG, "Context window usage: $tokens / $ctxLength = ${contextWindowUsedPercent}%")
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to calculate cost or context window usage", e)
         }
         
-        // Save assistant message (store as JSON if suggestions enabled, otherwise plain text)
-        val contentToStore = if (suggestionsEnabled && mood != null && suggestions.isNotEmpty()) {
-            // Store as JSON string that can be parsed later
-            val json = Json { ignoreUnknownKeys = true }
-            json.encodeToString(AiResponseDto(mood = mood, message = messageContent, suggestions = suggestions))
-        } else {
-            messageContent
-        }
-        
+        // Save assistant message
         val assistantMessage = ChatMessageEntity(
             id = assistantMessageId,
-            content = contentToStore,
+            content = messageContent,
             role = MessageRole.ASSISTANT,
             timestamp = System.currentTimeMillis(),
-            sessionId = sessionId
+            sessionId = sessionId,
+            modelId = responseModelId ?: modelId,
+            responseTimeMs = responseTimeMs,
+            promptTokens = promptTokens,
+            completionTokens = completionTokens,
+            contextWindowUsedPercent = contextWindowUsedPercent,
+            totalCost = totalCost
         )
         database.chatMessageDao().insertMessage(assistantMessage)
         
@@ -193,35 +258,18 @@ class ChatRepositoryImpl @Inject constructor(
     }
     
     private fun ChatMessageEntity.toDomain(): ChatMessage {
-        // Try to parse JSON if content looks like JSON
-        var messageContent = content
-        var mood: String? = null
-        var suggestions: List<String> = emptyList()
-        var rawJson: String? = null
-        
-        if (role == MessageRole.ASSISTANT && content.trim().startsWith("{") && content.contains("\"message\"")) {
-            rawJson = content // Store raw JSON
-            try {
-                val json = Json { ignoreUnknownKeys = true; isLenient = true }
-                val parsed = json.decodeFromString<AiResponseDto>(content)
-                messageContent = parsed.message
-                mood = parsed.mood
-                suggestions = parsed.suggestions
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to parse message JSON, using raw content", e)
-                // Use raw content if parsing fails
-            }
-        }
-        
         return ChatMessage(
             id = id,
-            content = messageContent,
+            content = content,
             role = role,
             timestamp = timestamp,
             sessionId = sessionId,
-            mood = mood,
-            suggestions = suggestions,
-            rawJson = rawJson
+            modelId = modelId,
+            responseTimeMs = responseTimeMs,
+            promptTokens = promptTokens,
+            completionTokens = completionTokens,
+            contextWindowUsedPercent = contextWindowUsedPercent,
+            totalCost = totalCost
         )
     }
     

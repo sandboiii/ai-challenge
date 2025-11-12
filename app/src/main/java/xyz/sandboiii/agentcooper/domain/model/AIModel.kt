@@ -7,6 +7,8 @@ data class AIModel(
     val name: String,
     val provider: String,
     val description: String? = null,
-    val pricing: PricingInfo? = null
+    val pricing: PricingInfo? = null,
+    val contextLength: Int? = null, // Context window size (numeric)
+    val contextLengthDisplay: String? = null // Context window size (formatted string, e.g., "8K", "128K")
 )
 

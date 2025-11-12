@@ -2,11 +2,19 @@ package xyz.sandboiii.agentcooper.data.remote.api
 
 import kotlinx.coroutines.flow.Flow
 
+data class MessageMetadata(
+    val modelId: String? = null,
+    val promptTokens: Int? = null,
+    val completionTokens: Int? = null,
+    val totalTokens: Int? = null
+)
+
 interface ChatApi {
     suspend fun sendMessage(
         messages: List<ChatMessageDto>,
         model: String,
-        stream: Boolean = true
+        stream: Boolean = true,
+        onMetadata: ((MessageMetadata) -> Unit)? = null // Callback to receive metadata
     ): Flow<String>
     
     suspend fun getModels(): List<ModelDto>
@@ -32,7 +40,9 @@ data class ModelDto(
     val name: String,
     val provider: String,
     val description: String? = null,
-    val pricing: PricingInfo? = null
+    val pricing: PricingInfo? = null,
+    val contextLength: Int? = null, // Context window size (numeric)
+    val contextLengthDisplay: String? = null // Context window size (formatted string, e.g., "8K", "128K")
 )
 
 data class PricingInfo(

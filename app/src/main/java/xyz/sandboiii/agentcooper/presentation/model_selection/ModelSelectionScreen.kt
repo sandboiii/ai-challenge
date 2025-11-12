@@ -3,13 +3,19 @@ package xyz.sandboiii.agentcooper.presentation.model_selection
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.size
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -153,35 +159,40 @@ fun ModelItem(
                             if (pricing.prompt != null && pricing.completion != null) {
                                 // First line: input pricing
                                 Text(
-                                    text = "${pricing.prompt} вход (ваш запрос)",
+                                    text = "$${pricing.prompt} вход",
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSecondaryContainer
                                 )
                                 // Second line: output pricing
                                 Text(
-                                    text = "${pricing.completion} выход (ответ модели)",
+                                    text = "$${pricing.completion} выход",
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSecondaryContainer
                                 )
                             } else if (pricing.prompt != null) {
                                 Text(
-                                    text = "${pricing.prompt} вход (ваш запрос)",
+                                    text = "$${pricing.prompt} вход",
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSecondaryContainer
                                 )
                             } else if (pricing.completion != null) {
                                 Text(
-                                    text = "${pricing.completion} выход (ответ модели)",
+                                    text = "$${pricing.completion} выход",
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSecondaryContainer
                                 )
                             } else {
+                                // Format displayText to add dollar signs
+                                val formattedText = pricing.displayText.replace(
+                                    Regex("(\\d+\\.?\\d*)"),
+                                    "\\$$1"
+                                )
                                 Text(
-                                    text = pricing.displayText,
+                                    text = formattedText,
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSecondaryContainer
@@ -192,22 +203,77 @@ fun ModelItem(
                 }
             }
             
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = model.provider,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            // Context window size
+            val contextDisplayText = when {
+                !model.contextLengthDisplay.isNullOrBlank() -> model.contextLengthDisplay
+                model.contextLength != null -> formatContextLength(model.contextLength)
+                else -> null
+            }
+            
+            contextDisplayText?.let { displayText ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "Контекст:",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = displayText,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+            
+            // Expandable description
             model.description?.let { description ->
+                var isExpanded by remember(model.id) { mutableStateOf(false) }
+                
                 Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = description,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(
+                            indication = null,
+                            interactionSource = remember { MutableInteractionSource() }
+                        ) { isExpanded = !isExpanded },
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = description,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = if (isExpanded) Int.MAX_VALUE else 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Icon(
+                        imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = if (isExpanded) "Свернуть" else "Развернуть",
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
+    }
+}
+
+/**
+ * Formats context length to a readable string (e.g., 8192 -> "8K", 128000 -> "128K")
+ */
+private fun formatContextLength(contextLength: Int): String {
+    return when {
+        contextLength >= 1_000_000 -> "${contextLength / 1_000_000}M"
+        contextLength >= 1_000 -> "${contextLength / 1_000}K"
+        else -> contextLength.toString()
     }
 }
 
