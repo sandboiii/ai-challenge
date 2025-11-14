@@ -78,11 +78,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.6.2")
     
-    // Room
-    implementation("androidx.room:room-runtime:2.6.1")
-    implementation("androidx.room:room-ktx:2.6.1")
-    kapt("androidx.room:room-compiler:2.6.1")
-    
     // Ktor
     implementation("io.ktor:ktor-client-core:2.3.5")
     implementation("io.ktor:ktor-client-android:2.3.5")
@@ -103,6 +98,9 @@ dependencies {
     
     // DataStore for preferences
     implementation("androidx.datastore:datastore-preferences:1.0.0")
+    
+    // DocumentFile for external storage access
+    implementation("androidx.documentfile:documentfile:1.0.1")
     
     // Markdown rendering for Compose
     implementation("io.github.dakshsemwal:mdparserkitcore:1.0.1")

@@ -25,6 +25,7 @@ class PreferencesManager @Inject constructor(
         private val WELCOME_MESSAGE_ENABLED = booleanPreferencesKey(Constants.PREF_WELCOME_MESSAGE_ENABLED)
         private val TEMPERATURE = floatPreferencesKey(Constants.PREF_TEMPERATURE)
         private val TOKEN_THRESHOLD = intPreferencesKey(Constants.PREF_TOKEN_THRESHOLD)
+        private val STORAGE_LOCATION = stringPreferencesKey(Constants.PREF_STORAGE_LOCATION)
     }
     
     val apiKey: Flow<String?> = dataStore.data.map { it[API_KEY] }
@@ -33,6 +34,7 @@ class PreferencesManager @Inject constructor(
     val welcomeMessageEnabled: Flow<Boolean> = dataStore.data.map { it[WELCOME_MESSAGE_ENABLED] ?: true }
     val temperature: Flow<Float> = dataStore.data.map { it[TEMPERATURE] ?: Constants.DEFAULT_TEMPERATURE }
     val tokenThreshold: Flow<Int?> = dataStore.data.map { it[TOKEN_THRESHOLD] }
+    val storageLocation: Flow<String?> = dataStore.data.map { it[STORAGE_LOCATION] }
     
     suspend fun setApiKey(key: String) {
         dataStore.edit { it[API_KEY] = key }
@@ -89,6 +91,30 @@ class PreferencesManager @Inject constructor(
             // Set default API key if not already set
             if (preferences[API_KEY] == null) {
                 preferences[API_KEY] = DEFAULT_API_KEY
+            }
+        }
+    }
+    
+    /**
+     * Получает текущую локацию хранения файлов сессий.
+     * 
+     * @return URI внешней папки или null если используется внутреннее хранилище
+     */
+    suspend fun getStorageLocation(): String? {
+        return dataStore.data.first()[STORAGE_LOCATION]
+    }
+    
+    /**
+     * Устанавливает локацию хранения файлов сессий.
+     * 
+     * @param locationUri URI внешней папки или null для использования внутреннего хранилища
+     */
+    suspend fun setStorageLocation(locationUri: String?) {
+        dataStore.edit { preferences ->
+            if (locationUri != null) {
+                preferences[STORAGE_LOCATION] = locationUri
+            } else {
+                preferences.remove(STORAGE_LOCATION)
             }
         }
     }

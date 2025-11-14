@@ -1,5 +1,6 @@
 package xyz.sandboiii.agentcooper.presentation.sessions
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -27,6 +28,10 @@ class SessionsViewModel @Inject constructor(
     private val preferencesManager: PreferencesManager,
     private val chatApi: ChatApi
 ) : ViewModel() {
+    
+    companion object {
+        private const val TAG = "SessionsViewModel"
+    }
     
     private val _state = MutableStateFlow<SessionsState>(SessionsState.Loading)
     val state: StateFlow<SessionsState> = _state.asStateFlow()
@@ -117,11 +122,17 @@ class SessionsViewModel @Inject constructor(
     }
     
     fun deleteSession(sessionId: String) {
+        Log.d(TAG, "deleteSession called for sessionId: $sessionId")
         viewModelScope.launch {
             try {
+                Log.d(TAG, "Starting deletion of session: $sessionId")
                 deleteSessionUseCase(sessionId)
+                Log.d(TAG, "Session deleted successfully: $sessionId")
+                // Сессии автоматически обновятся через Flow в loadSessions()
+                // Но вызываем loadSessions() для немедленного обновления UI
                 loadSessions()
             } catch (e: Exception) {
+                Log.e(TAG, "Error deleting session: $sessionId", e)
                 _state.value = SessionsState.Error(
                     message = e.message ?: "Failed to delete session"
                 )

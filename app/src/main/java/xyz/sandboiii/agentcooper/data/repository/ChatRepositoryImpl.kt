@@ -5,11 +5,15 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import java.util.UUID
-import xyz.sandboiii.agentcooper.data.local.database.AppDatabase
-import xyz.sandboiii.agentcooper.data.local.entity.ChatMessageEntity
+import xyz.sandboiii.agentcooper.data.local.storage.SessionFileStorage
 import xyz.sandboiii.agentcooper.data.remote.api.ChatApi
 import xyz.sandboiii.agentcooper.data.remote.api.ChatMessageDto
 import xyz.sandboiii.agentcooper.domain.model.ChatMessage
@@ -24,7 +28,7 @@ import javax.inject.Inject
 
 class ChatRepositoryImpl @Inject constructor(
     private val chatApi: ChatApi,
-    private val database: AppDatabase,
+    private val sessionFileStorage: SessionFileStorage,
     private val sessionRepository: SessionRepository,
     private val preferencesManager: PreferencesManager
 ) : ChatRepository {
@@ -36,12 +40,44 @@ class ChatRepositoryImpl @Inject constructor(
     private val _isSummarizing = MutableStateFlow(false)
     override val isSummarizing: StateFlow<Boolean> = _isSummarizing.asStateFlow()
     
+    @kotlinx.coroutines.ExperimentalCoroutinesApi
     override fun getMessages(sessionId: String): Flow<List<ChatMessage>> {
-        return database.chatMessageDao()
-            .getMessagesBySession(sessionId)
-            .map { entities ->
-                entities.map { it.toDomain() }
+        // Подписываемся на события изменений файлов для конкретной сессии
+        // Загружаем сообщения при старте и при каждом изменении файла
+        Log.d(TAG, "getMessages called for session: $sessionId")
+        return sessionFileStorage.changeEvents
+            .filter { 
+                val matches = it == sessionId
+                Log.d(TAG, "Change event received: $it, matches session $sessionId: $matches")
+                matches
             }
+            .onStart { 
+                // Эмитим событие для загрузки начального состояния
+                Log.d(TAG, "onStart: emitting initial load for session: $sessionId")
+                emit(sessionId)
+            }
+            .flatMapLatest { 
+                flow {
+                    val messages = loadMessagesFromFile(sessionId)
+                    Log.d(TAG, "Loading messages for session $sessionId: ${messages.size} messages")
+                    emit(messages)
+                }
+            }
+            .distinctUntilChanged()
+    }
+    
+    /**
+     * Загружает сообщения из файла сессии.
+     */
+    private suspend fun loadMessagesFromFile(sessionId: String): List<ChatMessage> {
+        return try {
+            val storageLocation = preferencesManager.getStorageLocation()
+            val sessionFile = sessionFileStorage.readSessionFile(sessionId, storageLocation)
+            sessionFile?.messages?.map { it.toDomain() } ?: emptyList()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading messages for session: $sessionId", e)
+            emptyList()
+        }
     }
     
     override suspend fun sendMessage(
@@ -49,9 +85,10 @@ class ChatRepositoryImpl @Inject constructor(
         content: String,
         modelId: String
     ): Flow<String> = flow {
+        val storageLocation = preferencesManager.getStorageLocation()
+        
         // Get conversation history before adding new message
-        val existingMessages = database.chatMessageDao()
-            .getMessagesBySessionSync(sessionId)
+        val existingMessages = loadMessagesFromFile(sessionId)
         
         // Check if this is the first user message (to generate title)
         val isFirstUserMessage = existingMessages.none { it.role == MessageRole.USER }
@@ -93,6 +130,10 @@ class ChatRepositoryImpl @Inject constructor(
         
         Log.d(TAG, "Token count: $tokenCount, Threshold: $effectiveThreshold")
         
+        // Get session for updating
+        val session = sessionRepository.getSessionById(sessionId)
+            ?: throw IllegalStateException("Session not found: $sessionId")
+        
         // If threshold is set and token count exceeds it, perform summarization BEFORE saving user message
         if (effectiveThreshold != null && tokenCount > effectiveThreshold) {
             Log.d(TAG, "Token count ($tokenCount) exceeds threshold ($effectiveThreshold), triggering summarization")
@@ -100,33 +141,32 @@ class ChatRepositoryImpl @Inject constructor(
             try {
                 // Summarize existing messages (excluding the new user message which hasn't been saved yet)
                 // The new user message will be saved after summarization
-                summarizeMessages(sessionId, modelId, existingMessages)
+                summarizeMessages(sessionId, modelId, existingMessages, storageLocation)
             } finally {
-                // Save user message BEFORE clearing summarization state to ensure it's in database when ViewModel reloads
-                val userMessage = ChatMessageEntity(
+                // Save user message BEFORE clearing summarization state to ensure it's in file when ViewModel reloads
+                val userMessage = ChatMessage(
                     id = UUID.randomUUID().toString(),
                     content = content,
                     role = MessageRole.USER,
                     timestamp = System.currentTimeMillis(),
                     sessionId = sessionId
                 )
-                database.chatMessageDao().insertMessage(userMessage)
+                sessionFileStorage.addMessageToSession(session, userMessage, storageLocation)
                 _isSummarizing.value = false // Update summarization state (after user message is saved)
             }
         } else {
-            val userMessage = ChatMessageEntity(
+            val userMessage = ChatMessage(
                 id = UUID.randomUUID().toString(),
                 content = content,
                 role = MessageRole.USER,
                 timestamp = System.currentTimeMillis(),
                 sessionId = sessionId
             )
-            database.chatMessageDao().insertMessage(userMessage)
+            sessionFileStorage.addMessageToSession(session, userMessage, storageLocation)
         }
         
         // Re-fetch messages after potential summarization
-        val messagesAfterSummarization = database.chatMessageDao()
-            .getMessagesBySessionSync(sessionId)
+        val messagesAfterSummarization = loadMessagesFromFile(sessionId)
         
         // Build final message context using the same function
         // The current user message is already included in messagesAfterSummarization since we saved it above
@@ -295,7 +335,7 @@ class ChatRepositoryImpl @Inject constructor(
         }
         
         // Save assistant message
-        val assistantMessage = ChatMessageEntity(
+        val assistantMessage = ChatMessage(
             id = assistantMessageId,
             content = messageContent,
             role = MessageRole.ASSISTANT,
@@ -308,7 +348,7 @@ class ChatRepositoryImpl @Inject constructor(
             contextWindowUsedPercent = contextWindowUsedPercent,
             totalCost = totalCost
         )
-        database.chatMessageDao().insertMessage(assistantMessage)
+        sessionFileStorage.addMessageToSession(session, assistantMessage, storageLocation)
         
         // Generate title from API if this is the first user message
         if (isFirstUserMessage && accumulatedContent.isNotEmpty()) {
@@ -326,24 +366,30 @@ class ChatRepositoryImpl @Inject constructor(
     }
     
     override suspend fun deleteMessages(sessionId: String) {
-        database.chatMessageDao().deleteMessagesBySession(sessionId)
+        val storageLocation = preferencesManager.getStorageLocation()
+        sessionFileStorage.deleteSessionMessages(sessionId, storageLocation)
     }
     
     override suspend fun deleteAllMessages() {
-        database.chatMessageDao().deleteAllMessages()
+        val storageLocation = preferencesManager.getStorageLocation()
+        val allSessions = sessionFileStorage.getAllSessionFiles(storageLocation)
+        
+        allSessions.forEach { sessionFile ->
+            sessionFileStorage.deleteSessionMessages(sessionFile.session.id, storageLocation)
+        }
     }
     
     /**
      * Builds message context for API calls.
      * Includes: system prompt + summary (if any) + messages after last summary + new user message (if provided).
      * 
-     * @param messages List of existing messages from database
+     * @param messages List of existing messages from file
      * @param systemPrompt System prompt to include
      * @param newUserMessageContent Optional new user message content to append (for token counting before saving)
      * @return List of ChatMessageDto ready to send to API
      */
     private fun buildMessageContext(
-        messages: List<ChatMessageEntity>,
+        messages: List<ChatMessage>,
         systemPrompt: String,
         newUserMessageContent: String? = null
     ): List<ChatMessageDto> {
@@ -357,7 +403,7 @@ class ChatRepositoryImpl @Inject constructor(
                 summaryMessage.summarizationContent?.let { summaryContent ->
                     add(ChatMessageDto(
                         role = "system",
-                        content = "$systemPrompt/n/nКраткое содержание предыдущего разговора: $summaryContent"
+                        content = "$systemPrompt\n\nКраткое содержание предыдущего разговора: $summaryContent"
                     ))
                 }
                 
@@ -402,23 +448,6 @@ class ChatRepositoryImpl @Inject constructor(
         }
     }
     
-    private fun ChatMessageEntity.toDomain(): ChatMessage {
-        return ChatMessage(
-            id = id,
-            content = content,
-            role = role,
-            timestamp = timestamp,
-            sessionId = sessionId,
-            modelId = modelId,
-            responseTimeMs = responseTimeMs,
-            promptTokens = promptTokens,
-            completionTokens = completionTokens,
-            contextWindowUsedPercent = contextWindowUsedPercent,
-            totalCost = totalCost,
-            summarizationContent = summarizationContent
-        )
-    }
-    
     /**
      * Summarizes old messages in the conversation to reduce token count.
      * Finds messages before the last summary (or all messages if no summary exists),
@@ -427,7 +456,8 @@ class ChatRepositoryImpl @Inject constructor(
     private suspend fun summarizeMessages(
         sessionId: String,
         modelId: String,
-        existingMessages: List<ChatMessageEntity>
+        existingMessages: List<ChatMessage>,
+        storageLocation: String?
     ) {
         try {
             // Find the last summary message index
@@ -488,8 +518,12 @@ class ChatRepositoryImpl @Inject constructor(
                 return
             }
             
-            // Create summary message entity
-            val summaryMessage = ChatMessageEntity(
+            // Get session for updating
+            val session = sessionRepository.getSessionById(sessionId)
+                ?: throw IllegalStateException("Session not found: $sessionId")
+            
+            // Create summary message
+            val summaryMessage = ChatMessage(
                 id = UUID.randomUUID().toString(),
                 content = "Chat history summarized",
                 role = MessageRole.SUMMARY,
@@ -500,7 +534,7 @@ class ChatRepositoryImpl @Inject constructor(
             )
             
             // Insert summary message
-            database.chatMessageDao().insertMessage(summaryMessage)
+            sessionFileStorage.addMessageToSession(session, summaryMessage, storageLocation)
             
             Log.d(TAG, "Summarization completed: ${summaryContent.length} characters")
         } catch (e: Exception) {
@@ -536,4 +570,3 @@ class ChatRepositoryImpl @Inject constructor(
         }
     }
 }
-

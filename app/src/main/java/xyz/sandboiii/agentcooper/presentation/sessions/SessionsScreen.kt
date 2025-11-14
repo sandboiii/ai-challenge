@@ -1,5 +1,7 @@
 package xyz.sandboiii.agentcooper.presentation.sessions
 
+import android.util.Log
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -309,34 +311,57 @@ fun SessionItem(
     val dateFormat = SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault())
     
     Card(
-        onClick = onClick,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .padding(16.dp)
         ) {
-            Column(
-                modifier = Modifier.weight(1f)
+            // Основная область с содержимым - кликабельна для открытия сессии
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(
+                        onClick = {
+                            Log.d("SessionItem", "Session clicked: ${session.id}")
+                            onClick()
+                        }
+                    ),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = session.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = dateFormat.format(Date(session.createdAt)),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Column(
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = session.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = dateFormat.format(Date(session.createdAt)),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                
+                // Плейсхолдер для кнопки удаления (чтобы не сдвигалось содержимое)
+                Spacer(modifier = Modifier.size(48.dp))
             }
             
-            IconButton(onClick = onDelete) {
+            // Кнопка удаления - поверх основного содержимого, правая сторона
+            IconButton(
+                onClick = {
+                    Log.d("SessionItem", "Delete button clicked for session: ${session.id}")
+                    onDelete()
+                },
+                modifier = Modifier
+                    .size(48.dp)
+                    .align(Alignment.CenterEnd)
+            ) {
                 Icon(
                     imageVector = Icons.Default.Delete,
                     contentDescription = "Удалить",

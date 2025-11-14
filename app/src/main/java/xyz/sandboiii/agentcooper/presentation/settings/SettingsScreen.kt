@@ -25,7 +25,11 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.net.Uri
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
@@ -45,8 +49,28 @@ fun SettingsScreen(
     val deleteSessionsSuccess by viewModel.deleteSessionsSuccess.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
     val tokenThreshold by viewModel.tokenThreshold.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = "")
     val saveTokenThresholdSuccess by viewModel.saveTokenThresholdSuccess.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
+    val storageLocation by viewModel.storageLocation.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = null)
+    val isMigrating by viewModel.isMigrating.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
+    val migrationSuccess by viewModel.migrationSuccess.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
     
     var showDeleteConfirmation by remember { mutableStateOf(false) }
+    
+    val context = LocalContext.current
+    
+    // Launcher for selecting folder
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri: Uri? ->
+        uri?.let {
+            // Grant persistent permission
+            context.contentResolver.takePersistableUriPermission(
+                it,
+                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+            viewModel.setStorageLocation(it.toString())
+        }
+    }
     
     // Initialize local state only once, sync when needed
     var localApiKey by remember { mutableStateOf("") }
@@ -121,6 +145,13 @@ fun SettingsScreen(
         if (saveTokenThresholdSuccess) {
             kotlinx.coroutines.delay(2000)
             viewModel.clearSaveTokenThresholdSuccess()
+        }
+    }
+    
+    LaunchedEffect(migrationSuccess) {
+        if (migrationSuccess) {
+            kotlinx.coroutines.delay(2000)
+            viewModel.clearMigrationSuccess()
         }
     }
     
@@ -489,6 +520,102 @@ fun SettingsScreen(
                                 "Сохранить порог",
                                 color = Color.White
                             )
+                        }
+                    }
+                }
+            }
+            
+            // Storage Location Section
+            Card(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "Локация хранения файлов",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    
+                    Text(
+                        text = if (storageLocation == null) {
+                            "Файлы сессий хранятся во внутреннем хранилище приложения"
+                        } else {
+                            "Файлы сессий хранятся во внешней папке"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    
+                    if (storageLocation != null) {
+                        Text(
+                            text = "Путь: ${storageLocation}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+                    }
+                    
+                    if (migrationSuccess) {
+                        Text(
+                            text = "Файлы успешно мигрированы",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                folderPickerLauncher.launch(null)
+                            },
+                            modifier = Modifier.weight(1f),
+                            enabled = !isMigrating && !isLoading,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF6200EE),
+                                contentColor = Color.White,
+                                disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        ) {
+                            if (isMigrating) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    color = Color.White
+                                )
+                            } else {
+                                Text(
+                                    "Выбрать папку",
+                                    color = Color.White
+                                )
+                            }
+                        }
+                        
+                        if (storageLocation != null) {
+                            Button(
+                                onClick = {
+                                    viewModel.resetToInternalStorage()
+                                },
+                                modifier = Modifier.weight(1f),
+                                enabled = !isMigrating && !isLoading,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.secondary,
+                                    contentColor = Color.White,
+                                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            ) {
+                                Text(
+                                    "Внутреннее",
+                                    color = Color.White
+                                )
+                            }
                         }
                     }
                 }

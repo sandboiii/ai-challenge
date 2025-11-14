@@ -13,7 +13,9 @@ object Constants {
     const val PREF_WELCOME_MESSAGE_ENABLED = "welcome_message_enabled"
     const val PREF_TEMPERATURE = "temperature"
     const val PREF_TOKEN_THRESHOLD = "token_threshold"
+    const val PREF_STORAGE_LOCATION = "storage_location"
     const val PREF_DATASTORE_NAME = "agent_cooper_prefs"
+    const val DEFAULT_SESSIONS_DIR_NAME = "sessions"
     
     const val DEFAULT_TEMPERATURE = 0.7f
     const val MIN_TEMPERATURE = 0.0f

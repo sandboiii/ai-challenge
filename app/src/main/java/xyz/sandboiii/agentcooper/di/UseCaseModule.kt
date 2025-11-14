@@ -48,10 +48,9 @@ object UseCaseModule {
     @Provides
     @Singleton
     fun provideDeleteSessionUseCase(
-        sessionRepository: SessionRepository,
-        chatRepository: ChatRepository
+        sessionRepository: SessionRepository
     ): DeleteSessionUseCase {
-        return DeleteSessionUseCase(sessionRepository, chatRepository)
+        return DeleteSessionUseCase(sessionRepository)
     }
     
     @Provides

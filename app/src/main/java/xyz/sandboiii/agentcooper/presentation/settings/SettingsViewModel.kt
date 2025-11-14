@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import xyz.sandboiii.agentcooper.data.local.storage.StorageMigration
 import xyz.sandboiii.agentcooper.domain.usecase.DeleteAllSessionsUseCase
 import xyz.sandboiii.agentcooper.util.Constants
 import xyz.sandboiii.agentcooper.util.PreferencesManager
@@ -15,7 +16,8 @@ import javax.inject.Inject
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val preferencesManager: PreferencesManager,
-    private val deleteAllSessionsUseCase: DeleteAllSessionsUseCase
+    private val deleteAllSessionsUseCase: DeleteAllSessionsUseCase,
+    private val storageMigration: StorageMigration
 ) : ViewModel() {
     
     private val _apiKey = MutableStateFlow<String>("")
@@ -51,11 +53,21 @@ class SettingsViewModel @Inject constructor(
     private val _saveTokenThresholdSuccess = MutableStateFlow(false)
     val saveTokenThresholdSuccess: StateFlow<Boolean> = _saveTokenThresholdSuccess.asStateFlow()
     
+    private val _storageLocation = MutableStateFlow<String?>(null)
+    val storageLocation: StateFlow<String?> = _storageLocation.asStateFlow()
+    
+    private val _isMigrating = MutableStateFlow(false)
+    val isMigrating: StateFlow<Boolean> = _isMigrating.asStateFlow()
+    
+    private val _migrationSuccess = MutableStateFlow(false)
+    val migrationSuccess: StateFlow<Boolean> = _migrationSuccess.asStateFlow()
+    
     init {
         loadApiKey()
         loadSystemPrompt()
         loadWelcomeMessageEnabled()
         loadTokenThreshold()
+        loadStorageLocation()
     }
     
     private fun loadApiKey() {
@@ -241,6 +253,59 @@ class SettingsViewModel @Inject constructor(
     
     fun clearSaveTokenThresholdSuccess() {
         _saveTokenThresholdSuccess.value = false
+    }
+    
+    private fun loadStorageLocation() {
+        viewModelScope.launch {
+            try {
+                _storageLocation.value = preferencesManager.getStorageLocation()
+            } catch (e: Exception) {
+                _errorMessage.value = "Ошибка загрузки локации хранения: ${e.message}"
+            }
+        }
+    }
+    
+    /**
+     * Устанавливает новую локацию хранения и мигрирует файлы.
+     * 
+     * @param newLocationUri URI новой папки или null для внутреннего хранилища
+     */
+    fun setStorageLocation(newLocationUri: String?) {
+        viewModelScope.launch {
+            _isMigrating.value = true
+            _errorMessage.value = null
+            _migrationSuccess.value = false
+            
+            try {
+                val oldLocation = preferencesManager.getStorageLocation()
+                
+                // Мигрируем файлы из старой локации в новую
+                if (oldLocation != newLocationUri) {
+                    val migratedCount = storageMigration.migrateFiles(oldLocation, newLocationUri)
+                    android.util.Log.d("SettingsViewModel", "Migrated $migratedCount files")
+                }
+                
+                // Устанавливаем новую локацию
+                preferencesManager.setStorageLocation(newLocationUri)
+                _storageLocation.value = newLocationUri
+                _migrationSuccess.value = true
+            } catch (e: Exception) {
+                _errorMessage.value = "Ошибка миграции файлов: ${e.message}"
+            } finally {
+                _isMigrating.value = false
+            }
+        }
+    }
+    
+    /**
+     * Сбрасывает локацию хранения на внутреннее хранилище.
+     */
+    fun resetToInternalStorage() {
+        setStorageLocation(null)
+    }
+    
+    fun clearMigrationSuccess() {
+        _migrationSuccess.value = false
     }
 }
 
