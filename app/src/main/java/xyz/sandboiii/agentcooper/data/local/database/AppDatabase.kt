@@ -8,7 +8,7 @@ import xyz.sandboiii.agentcooper.data.local.entity.SessionEntity
 
 @Database(
     entities = [ChatMessageEntity::class, SessionEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

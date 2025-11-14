@@ -107,6 +107,9 @@ dependencies {
     // Markdown rendering for Compose
     implementation("io.github.dakshsemwal:mdparserkitcore:1.0.1")
     
+    // Tokenizer for token counting
+    implementation("com.aallam.ktoken:ktoken:0.4.0")
+    
     // Testing
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")

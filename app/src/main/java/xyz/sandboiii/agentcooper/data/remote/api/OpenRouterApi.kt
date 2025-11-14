@@ -67,7 +67,8 @@ class OpenRouterApi @Inject constructor(
             model = model,
             messages = requestMessages,
             stream = stream,
-            temperature = temperature.toDouble()
+            temperature = temperature.toDouble(),
+            usage = UsageRequest(include = true) // Enable usage accounting to get cost from API
         )
         
         try {
@@ -131,9 +132,10 @@ class OpenRouterApi @Inject constructor(
                                 modelId = lastResponseModel,
                                 promptTokens = lastUsage?.prompt_tokens,
                                 completionTokens = lastUsage?.completion_tokens,
-                                totalTokens = lastUsage?.total_tokens
+                                totalTokens = lastUsage?.total_tokens,
+                                cost = lastUsage?.cost
                             ))
-                            Log.d(TAG, "Invoked metadata callback: model=$lastResponseModel, usage=$lastUsage")
+                            Log.d(TAG, "Invoked metadata callback: model=$lastResponseModel, usage=$lastUsage, cost=${lastUsage?.cost}")
                             break
                         }
                         
@@ -148,7 +150,7 @@ class OpenRouterApi @Inject constructor(
                                 }
                                 if (jsonResponse.usage != null) {
                                     lastUsage = jsonResponse.usage
-                                    Log.d(TAG, "Captured usage: prompt=${jsonResponse.usage.prompt_tokens}, completion=${jsonResponse.usage.completion_tokens}, total=${jsonResponse.usage.total_tokens}")
+                                    Log.d(TAG, "Captured usage: prompt=${jsonResponse.usage.prompt_tokens}, completion=${jsonResponse.usage.completion_tokens}, total=${jsonResponse.usage.total_tokens}, cost=${jsonResponse.usage.cost}")
                                 }
                                 
                                 // Try delta first (for streaming chunks)
@@ -196,7 +198,8 @@ class OpenRouterApi @Inject constructor(
                                     modelId = lastResponseModel,
                                     promptTokens = lastUsage?.prompt_tokens,
                                     completionTokens = lastUsage?.completion_tokens,
-                                    totalTokens = lastUsage?.total_tokens
+                                    totalTokens = lastUsage?.total_tokens,
+                                    cost = lastUsage?.cost
                                 ))
                             } catch (e: Exception) {
                                 Log.w(TAG, "Failed to extract metadata from last line", e)
@@ -227,7 +230,8 @@ class OpenRouterApi @Inject constructor(
                                 modelId = jsonResponse.model,
                                 promptTokens = jsonResponse.usage?.prompt_tokens,
                                 completionTokens = jsonResponse.usage?.completion_tokens,
-                                totalTokens = jsonResponse.usage?.total_tokens
+                                totalTokens = jsonResponse.usage?.total_tokens,
+                                cost = jsonResponse.usage?.cost
                             ))
                         }
                         
@@ -281,8 +285,10 @@ class OpenRouterApi @Inject constructor(
                         modelId = jsonResponse.model,
                         promptTokens = jsonResponse.usage?.prompt_tokens,
                         completionTokens = jsonResponse.usage?.completion_tokens,
-                        totalTokens = jsonResponse.usage?.total_tokens
+                        totalTokens = jsonResponse.usage?.total_tokens,
+                        cost = jsonResponse.usage?.cost
                     ))
+                    Log.d(TAG, "Non-streaming metadata: cost=${jsonResponse.usage?.cost}")
                 }
                 
                 jsonResponse.choices?.firstOrNull()?.message?.content?.let { content ->
@@ -430,8 +436,6 @@ class OpenRouterApi @Inject constructor(
                         completion = it.completion
                     )
                 }
-                
-                Log.d(TAG, "Model: ${modelData.id}, Name: ${modelData.name}, Provider: $providerName, Pricing: ${pricingInfo?.displayText ?: "unknown"}, Data Policy: ${modelData.data_policy}, Context Length: ${modelData.context_length}, Context Length Display: ${modelData.context_length_display}")
                 
                 ModelDto(
                     id = modelData.id,

@@ -15,7 +15,8 @@ data class OpenRouterResponse(
 data class Usage(
     val prompt_tokens: Int? = null,
     val completion_tokens: Int? = null,
-    val total_tokens: Int? = null
+    val total_tokens: Int? = null,
+    val cost: Double? = null // Cost in credits from OpenRouter usage accounting
 )
 
 @Serializable

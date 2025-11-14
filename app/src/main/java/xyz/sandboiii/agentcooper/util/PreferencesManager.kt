@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -23,6 +24,7 @@ class PreferencesManager @Inject constructor(
         private val SYSTEM_PROMPT = stringPreferencesKey(Constants.PREF_SYSTEM_PROMPT)
         private val WELCOME_MESSAGE_ENABLED = booleanPreferencesKey(Constants.PREF_WELCOME_MESSAGE_ENABLED)
         private val TEMPERATURE = floatPreferencesKey(Constants.PREF_TEMPERATURE)
+        private val TOKEN_THRESHOLD = intPreferencesKey(Constants.PREF_TOKEN_THRESHOLD)
     }
     
     val apiKey: Flow<String?> = dataStore.data.map { it[API_KEY] }
@@ -30,6 +32,7 @@ class PreferencesManager @Inject constructor(
     val systemPrompt: Flow<String?> = dataStore.data.map { it[SYSTEM_PROMPT] }
     val welcomeMessageEnabled: Flow<Boolean> = dataStore.data.map { it[WELCOME_MESSAGE_ENABLED] ?: true }
     val temperature: Flow<Float> = dataStore.data.map { it[TEMPERATURE] ?: Constants.DEFAULT_TEMPERATURE }
+    val tokenThreshold: Flow<Int?> = dataStore.data.map { it[TOKEN_THRESHOLD] }
     
     suspend fun setApiKey(key: String) {
         dataStore.edit { it[API_KEY] = key }
@@ -61,6 +64,14 @@ class PreferencesManager @Inject constructor(
     
     suspend fun getTemperature(): Float {
         return dataStore.data.first()[TEMPERATURE] ?: Constants.DEFAULT_TEMPERATURE
+    }
+    
+    suspend fun getTokenThreshold(): Int? {
+        return dataStore.data.first()[TOKEN_THRESHOLD]
+    }
+    
+    suspend fun setTokenThreshold(threshold: Int) {
+        dataStore.edit { it[TOKEN_THRESHOLD] = threshold }
     }
     
     suspend fun getApiKey(): String? {

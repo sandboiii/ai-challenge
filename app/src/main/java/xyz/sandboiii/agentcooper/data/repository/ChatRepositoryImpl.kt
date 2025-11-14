@@ -2,6 +2,9 @@ package xyz.sandboiii.agentcooper.data.repository
 
 import android.util.Log
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import java.util.UUID
@@ -15,6 +18,7 @@ import xyz.sandboiii.agentcooper.domain.repository.ChatRepository
 import xyz.sandboiii.agentcooper.domain.repository.SessionRepository
 import xyz.sandboiii.agentcooper.util.Constants
 import xyz.sandboiii.agentcooper.util.PreferencesManager
+import xyz.sandboiii.agentcooper.util.TokenCounter
 
 import javax.inject.Inject
 
@@ -28,6 +32,9 @@ class ChatRepositoryImpl @Inject constructor(
     companion object {
         private const val TAG = "ChatRepositoryImpl"
     }
+    
+    private val _isSummarizing = MutableStateFlow(false)
+    override val isSummarizing: StateFlow<Boolean> = _isSummarizing.asStateFlow()
     
     override fun getMessages(sessionId: String): Flow<List<ChatMessage>> {
         return database.chatMessageDao()
@@ -49,40 +56,90 @@ class ChatRepositoryImpl @Inject constructor(
         // Check if this is the first user message (to generate title)
         val isFirstUserMessage = existingMessages.none { it.role == MessageRole.USER }
         
-        // Save user message
-        val userMessage = ChatMessageEntity(
-            id = UUID.randomUUID().toString(),
-            content = content,
-            role = MessageRole.USER,
-            timestamp = System.currentTimeMillis(),
-            sessionId = sessionId
-        )
-        database.chatMessageDao().insertMessage(userMessage)
-        
         // Get system prompt
         val systemPrompt = preferencesManager.getSystemPrompt() ?: Constants.DEFAULT_SYSTEM_PROMPT
         
-        val messages = mutableListOf<ChatMessageDto>().apply {
-            // Add system prompt as first message
-            add(ChatMessageDto(role = "system", content = systemPrompt))
-            // Add existing messages, but exclude welcome message (don't send it to AI context)
-            existingMessages.forEach { msg ->
-                // Skip welcome message - it's just for display, not for AI context
-                if (!msg.id.startsWith("welcome-")) {
-                    add(ChatMessageDto(
-                        role = when (msg.role) {
-                            MessageRole.USER -> "user"
-                            MessageRole.ASSISTANT -> "assistant"
-                            MessageRole.SYSTEM -> "system"
-                        },
-                        content = msg.content
-                    ))
-                } else {
-                    Log.d(TAG, "Skipping welcome message from AI context: ${msg.id}")
-                }
+        // Build initial message context for token counting
+        // IMPORTANT: Count ALL tokens including summary content, matching what will be sent to the API
+        // Include the new user message content for accurate token counting
+        val initialMessages = buildMessageContext(
+            messages = existingMessages,
+            systemPrompt = systemPrompt,
+            newUserMessageContent = content
+        )
+        
+        // Log token counting info
+        val userMessageCount = initialMessages.count { it.role == "user" }
+        val assistantMessageCount = initialMessages.count { it.role == "assistant" }
+        val summaryCount = initialMessages.count { it.role == "system" && it.content.startsWith("Краткое содержание") }
+        Log.d(TAG, "Token counting: 1 system prompt, ${summaryCount} summary (if present), ${userMessageCount} user messages, ${assistantMessageCount} assistant messages")
+        
+        // Check token count and trigger summarization if needed (BEFORE saving user message)
+        // This counts ALL input tokens: system prompt + summary (if present) + all user messages + all assistant messages
+        // The token count matches exactly what will be sent to the API
+        val tokenCount = TokenCounter.countTokens(initialMessages)
+        val threshold = preferencesManager.getTokenThreshold()
+        
+        // Get model context length as fallback threshold
+        val modelContextLength = try {
+            val models = chatApi.getModels()
+            models.find { it.id == modelId }?.contextLength
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to get model context length", e)
+            null
+        }
+        
+        val effectiveThreshold = threshold ?: modelContextLength
+        
+        Log.d(TAG, "Token count: $tokenCount, Threshold: $effectiveThreshold")
+        
+        // If threshold is set and token count exceeds it, perform summarization BEFORE saving user message
+        if (effectiveThreshold != null && tokenCount > effectiveThreshold) {
+            Log.d(TAG, "Token count ($tokenCount) exceeds threshold ($effectiveThreshold), triggering summarization")
+            _isSummarizing.value = true // Update summarization state
+            try {
+                // Summarize existing messages (excluding the new user message which hasn't been saved yet)
+                // The new user message will be saved after summarization
+                summarizeMessages(sessionId, modelId, existingMessages)
+            } finally {
+                // Save user message BEFORE clearing summarization state to ensure it's in database when ViewModel reloads
+                val userMessage = ChatMessageEntity(
+                    id = UUID.randomUUID().toString(),
+                    content = content,
+                    role = MessageRole.USER,
+                    timestamp = System.currentTimeMillis(),
+                    sessionId = sessionId
+                )
+                database.chatMessageDao().insertMessage(userMessage)
+                _isSummarizing.value = false // Update summarization state (after user message is saved)
             }
-            // Add current user message
-            add(ChatMessageDto(role = "user", content = content))
+        } else {
+            val userMessage = ChatMessageEntity(
+                id = UUID.randomUUID().toString(),
+                content = content,
+                role = MessageRole.USER,
+                timestamp = System.currentTimeMillis(),
+                sessionId = sessionId
+            )
+            database.chatMessageDao().insertMessage(userMessage)
+        }
+        
+        // Re-fetch messages after potential summarization
+        val messagesAfterSummarization = database.chatMessageDao()
+            .getMessagesBySessionSync(sessionId)
+        
+        // Build final message context using the same function
+        // The current user message is already included in messagesAfterSummarization since we saved it above
+        val messages = buildMessageContext(
+            messages = messagesAfterSummarization,
+            systemPrompt = systemPrompt,
+            newUserMessageContent = null // User message is already in messagesAfterSummarization
+        )
+        
+        // Log final message context - each message on a separate line
+        Log.d(TAG, "Final message context (${messages.size} messages):")
+        messages.forEachIndexed { index, message ->
+            Log.d(TAG, "  [$index] ${message.role}: ${message.content}")
         }
         
         // Create assistant message entity
@@ -95,6 +152,7 @@ class ChatRepositoryImpl @Inject constructor(
         var promptTokens: Int? = null
         var completionTokens: Int? = null
         var totalTokens: Int? = null
+        var apiCost: Double? = null // Cost from API usage accounting
         
         // Stream response from API with metadata callback
         try {
@@ -103,12 +161,13 @@ class ChatRepositoryImpl @Inject constructor(
                 modelId, 
                 stream = true,
                 onMetadata = { metadata ->
-                    Log.d(TAG, "Metadata callback invoked: model=${metadata.modelId}, prompt=${metadata.promptTokens}, completion=${metadata.completionTokens}, total=${metadata.totalTokens}")
+                    Log.d(TAG, "Metadata callback invoked: model=${metadata.modelId}, prompt=${metadata.promptTokens}, completion=${metadata.completionTokens}, total=${metadata.totalTokens}, cost=${metadata.cost}")
                     responseModelId = metadata.modelId ?: modelId
                     promptTokens = metadata.promptTokens
                     completionTokens = metadata.completionTokens
                     totalTokens = metadata.totalTokens
-                    Log.d(TAG, "Updated token variables: prompt=$promptTokens, completion=$completionTokens, total=$totalTokens")
+                    apiCost = metadata.cost
+                    Log.d(TAG, "Updated token variables: prompt=$promptTokens, completion=$completionTokens, total=$totalTokens, apiCost=$apiCost")
                 }
             ).collect { chunk ->
                 accumulatedContent += chunk
@@ -125,75 +184,92 @@ class ChatRepositoryImpl @Inject constructor(
         val messageContent = accumulatedContent
         
         // Log final token values before cost calculation
-        Log.d(TAG, "Before cost calculation - Final token values: prompt=$promptTokens, completion=$completionTokens, total=$totalTokens, modelId=${responseModelId ?: modelId}")
+        Log.d(TAG, "Before cost calculation - Final token values: prompt=$promptTokens, completion=$completionTokens, total=$totalTokens, modelId=${responseModelId ?: modelId}, apiCost=$apiCost")
         
         // Calculate cost and context window usage
         var totalCost: Double? = null
         var contextWindowUsedPercent: Double? = null
         
+        // Use API cost if available, otherwise fallback to local calculation
+        if (apiCost != null) {
+            totalCost = apiCost
+            Log.d(TAG, "Using cost from API usage accounting: $totalCost")
+        } else {
+            Log.d(TAG, "API cost not available, falling back to local calculation")
+            try {
+                val models = chatApi.getModels()
+                val lookupModelId = responseModelId ?: modelId
+                val model = models.find { it.id == lookupModelId }
+                
+                Log.d(TAG, "Looking up model for cost calculation: $lookupModelId")
+                Log.d(TAG, "Token usage: prompt=$promptTokens, completion=$completionTokens, total=$totalTokens")
+                
+                if (model == null) {
+                    Log.w(TAG, "Model not found in models list: $lookupModelId")
+                    Log.w(TAG, "Available model IDs (first 10): ${models.take(10).map { it.id }}")
+                }
+                
+                model?.let { modelInfo ->
+                    Log.d(TAG, "Found model: ${modelInfo.name}, pricing: ${modelInfo.pricing?.displayText ?: "null"}")
+                    
+                    // Calculate cost if model is paid
+                    modelInfo.pricing?.let { pricing ->
+                        Log.d(TAG, "Pricing details: prompt=${pricing.prompt}, completion=${pricing.completion}, isFree=${pricing.isFree}")
+                        
+                        // Parse pricing values - OpenRouter pricing is per token (not per million)
+                        // According to https://openrouter.ai/docs/overview/models: "All pricing values are in USD per token"
+                        val promptPricePerToken = pricing.prompt?.let { 
+                            val parsed = it.toDoubleOrNull()
+                            Log.d(TAG, "Parsing prompt price per token: '$it' -> $parsed")
+                            parsed
+                        } ?: 0.0
+                        val completionPricePerToken = pricing.completion?.let {
+                            val parsed = it.toDoubleOrNull()
+                            Log.d(TAG, "Parsing completion price per token: '$it' -> $parsed")
+                            parsed
+                        } ?: 0.0
+                        
+                        // Model is paid if either price is > 0 (regardless of isFree flag, as some models might have incorrect isFree)
+                        val isActuallyPaid = promptPricePerToken > 0.0 || completionPricePerToken > 0.0
+                        
+                        Log.d(TAG, "Price per token: prompt=$promptPricePerToken, completion=$completionPricePerToken, isActuallyPaid=$isActuallyPaid, isFree=${pricing.isFree}")
+                        
+                        // Calculate cost if we have tokens and pricing
+                        if (promptTokens != null && completionTokens != null && (promptTokens!! > 0 || completionTokens!! > 0)) {
+                            if (isActuallyPaid) {
+                                // Calculate cost: tokens * price_per_token (OpenRouter pricing is per token, not per million)
+                                val promptCost = promptTokens!! * promptPricePerToken
+                                val completionCost = completionTokens!! * completionPricePerToken
+                                totalCost = promptCost + completionCost
+                                
+                                Log.d(TAG, "Cost breakdown: promptCost=$promptCost (${promptTokens} tokens * $promptPricePerToken), completionCost=$completionCost (${completionTokens} tokens * $completionPricePerToken), total=$totalCost")
+                                
+                                // Verify calculation - log error if cost is unexpectedly zero
+                                totalCost?.let { cost ->
+                                    if (cost == 0.0 && (promptTokens!! > 0 || completionTokens!! > 0) && (promptPricePerToken > 0.0 || completionPricePerToken > 0.0)) {
+                                        Log.e(TAG, "ERROR: Cost is zero but should not be! promptTokens=$promptTokens, completionTokens=$completionTokens, promptPrice=$promptPricePerToken, completionPrice=$completionPricePerToken")
+                                    }
+                                }
+                            } else {
+                                Log.d(TAG, "Model is free (both prices are 0 or null), skipping cost calculation")
+                            }
+                        } else {
+                            Log.d(TAG, "Skipping cost calculation: promptTokens=$promptTokens, completionTokens=$completionTokens")
+                        }
+                    } ?: Log.w(TAG, "Model has no pricing information")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to calculate cost locally", e)
+            }
+        }
+        
+        // Calculate context window usage percentage (separate from cost calculation)
         try {
             val models = chatApi.getModels()
             val lookupModelId = responseModelId ?: modelId
             val model = models.find { it.id == lookupModelId }
             
-            Log.d(TAG, "Looking up model for cost calculation: $lookupModelId")
-            Log.d(TAG, "Token usage: prompt=$promptTokens, completion=$completionTokens, total=$totalTokens")
-            
-            if (model == null) {
-                Log.w(TAG, "Model not found in models list: $lookupModelId")
-                Log.w(TAG, "Available model IDs (first 10): ${models.take(10).map { it.id }}")
-            }
-            
             model?.let { modelInfo ->
-                Log.d(TAG, "Found model: ${modelInfo.name}, pricing: ${modelInfo.pricing?.displayText ?: "null"}")
-                
-                // Calculate cost if model is paid
-                modelInfo.pricing?.let { pricing ->
-                    Log.d(TAG, "Pricing details: prompt=${pricing.prompt}, completion=${pricing.completion}, isFree=${pricing.isFree}")
-                    
-                    // Parse pricing values - OpenRouter pricing is per token (not per million)
-                    // According to https://openrouter.ai/docs/overview/models: "All pricing values are in USD per token"
-                    val promptPricePerToken = pricing.prompt?.let { 
-                        val parsed = it.toDoubleOrNull()
-                        Log.d(TAG, "Parsing prompt price per token: '$it' -> $parsed")
-                        parsed
-                    } ?: 0.0
-                    val completionPricePerToken = pricing.completion?.let {
-                        val parsed = it.toDoubleOrNull()
-                        Log.d(TAG, "Parsing completion price per token: '$it' -> $parsed")
-                        parsed
-                    } ?: 0.0
-                    
-                    // Model is paid if either price is > 0 (regardless of isFree flag, as some models might have incorrect isFree)
-                    val isActuallyPaid = promptPricePerToken > 0.0 || completionPricePerToken > 0.0
-                    
-                    Log.d(TAG, "Price per token: prompt=$promptPricePerToken, completion=$completionPricePerToken, isActuallyPaid=$isActuallyPaid, isFree=${pricing.isFree}")
-                    
-                    // Calculate cost if we have tokens and pricing
-                    if (promptTokens != null && completionTokens != null && (promptTokens!! > 0 || completionTokens!! > 0)) {
-                        if (isActuallyPaid) {
-                            // Calculate cost: tokens * price_per_token (OpenRouter pricing is per token, not per million)
-                            val promptCost = promptTokens!! * promptPricePerToken
-                            val completionCost = completionTokens!! * completionPricePerToken
-                            totalCost = promptCost + completionCost
-                            
-                            Log.d(TAG, "Cost breakdown: promptCost=$promptCost (${promptTokens} tokens * $promptPricePerToken), completionCost=$completionCost (${completionTokens} tokens * $completionPricePerToken), total=$totalCost")
-                            
-                            // Verify calculation - log error if cost is unexpectedly zero
-                            totalCost?.let { cost ->
-                                if (cost == 0.0 && (promptTokens!! > 0 || completionTokens!! > 0) && (promptPricePerToken > 0.0 || completionPricePerToken > 0.0)) {
-                                    Log.e(TAG, "ERROR: Cost is zero but should not be! promptTokens=$promptTokens, completionTokens=$completionTokens, promptPrice=$promptPricePerToken, completionPrice=$completionPricePerToken")
-                                }
-                            }
-                        } else {
-                            Log.d(TAG, "Model is free (both prices are 0 or null), skipping cost calculation")
-                        }
-                    } else {
-                        Log.d(TAG, "Skipping cost calculation: promptTokens=$promptTokens, completionTokens=$completionTokens")
-                    }
-                } ?: Log.w(TAG, "Model has no pricing information")
-                
-                // Calculate context window usage percentage
                 totalTokens?.let { tokens ->
                     val actualContextLength = modelInfo.contextLength ?: run {
                         // Fallback to default context window sizes for common models
@@ -215,7 +291,7 @@ class ChatRepositoryImpl @Inject constructor(
                 }
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to calculate cost or context window usage", e)
+            Log.w(TAG, "Failed to calculate context window usage", e)
         }
         
         // Save assistant message
@@ -257,6 +333,75 @@ class ChatRepositoryImpl @Inject constructor(
         database.chatMessageDao().deleteAllMessages()
     }
     
+    /**
+     * Builds message context for API calls.
+     * Includes: system prompt + summary (if any) + messages after last summary + new user message (if provided).
+     * 
+     * @param messages List of existing messages from database
+     * @param systemPrompt System prompt to include
+     * @param newUserMessageContent Optional new user message content to append (for token counting before saving)
+     * @return List of ChatMessageDto ready to send to API
+     */
+    private fun buildMessageContext(
+        messages: List<ChatMessageEntity>,
+        systemPrompt: String,
+        newUserMessageContent: String? = null
+    ): List<ChatMessageDto> {
+        return mutableListOf<ChatMessageDto>().apply {
+            // Find the last summary message (if any)
+            val lastSummaryIndex = messages.indexOfLast { it.role == MessageRole.SUMMARY }
+            
+            if (lastSummaryIndex >= 0) {
+                // Include the summary content as a system message
+                val summaryMessage = messages[lastSummaryIndex]
+                summaryMessage.summarizationContent?.let { summaryContent ->
+                    add(ChatMessageDto(
+                        role = "system",
+                        content = "$systemPrompt/n/nКраткое содержание предыдущего разговора: $summaryContent"
+                    ))
+                }
+                
+                // Only include messages after the last summary (excluding welcome and summary messages)
+                messages.subList(lastSummaryIndex + 1, messages.size).forEach { msg ->
+                    if (!msg.id.startsWith("welcome-") && msg.role != MessageRole.SUMMARY) {
+                        add(ChatMessageDto(
+                            role = when (msg.role) {
+                                MessageRole.USER -> "user"
+                                MessageRole.ASSISTANT -> "assistant"
+                                MessageRole.SYSTEM -> "system"
+                                else -> "user" // fallback
+                            },
+                            content = msg.content
+                        ))
+                    }
+                }
+            } else {
+                // Add system prompt as first message
+                add(ChatMessageDto(role = "system", content = systemPrompt))
+
+                // No summary exists, include all messages (except welcome and summaries)
+                messages.forEach { msg ->
+                    if (!msg.id.startsWith("welcome-") && msg.role != MessageRole.SUMMARY) {
+                        add(ChatMessageDto(
+                            role = when (msg.role) {
+                                MessageRole.USER -> "user"
+                                MessageRole.ASSISTANT -> "assistant"
+                                MessageRole.SYSTEM -> "system"
+                                else -> "user" // fallback
+                            },
+                            content = msg.content
+                        ))
+                    }
+                }
+            }
+            
+            // Add new user message if provided (for token counting before saving)
+            newUserMessageContent?.let { content ->
+                add(ChatMessageDto(role = "user", content = content))
+            }
+        }
+    }
+    
     private fun ChatMessageEntity.toDomain(): ChatMessage {
         return ChatMessage(
             id = id,
@@ -269,8 +414,99 @@ class ChatRepositoryImpl @Inject constructor(
             promptTokens = promptTokens,
             completionTokens = completionTokens,
             contextWindowUsedPercent = contextWindowUsedPercent,
-            totalCost = totalCost
+            totalCost = totalCost,
+            summarizationContent = summarizationContent
         )
+    }
+    
+    /**
+     * Summarizes old messages in the conversation to reduce token count.
+     * Finds messages before the last summary (or all messages if no summary exists),
+     * creates a summary, and inserts it as a SUMMARY role message.
+     */
+    private suspend fun summarizeMessages(
+        sessionId: String,
+        modelId: String,
+        existingMessages: List<ChatMessageEntity>
+    ) {
+        try {
+            // Find the last summary message index
+            val lastSummaryIndex = existingMessages.indexOfLast { it.role == MessageRole.SUMMARY }
+            
+            // Determine which messages to summarize
+            val messagesToSummarize = if (lastSummaryIndex >= 0) {
+                // Summarize messages since the last summary (including all messages up to current point)
+                // This includes the last summary as well
+                existingMessages.subList(lastSummaryIndex, existingMessages.size)
+            } else {
+                // The summary will include everything up to the current point
+                if (existingMessages.isNotEmpty()) {
+                    existingMessages
+                } else {
+                    emptyList() // No messages to summarize
+                }
+            }
+            
+            if (messagesToSummarize.isEmpty()) {
+                Log.d(TAG, "No messages to summarize")
+                return
+            }
+            
+            Log.d(TAG, "Summarizing ${messagesToSummarize.size} messages")
+            
+            // Build summarization prompt
+            val conversationText = messagesToSummarize.joinToString("\n") { msg ->
+                val roleText = when (msg.role) {
+                    MessageRole.USER -> "Пользователь"
+                    MessageRole.ASSISTANT -> "Ассистент"
+                    MessageRole.SYSTEM -> "Система"
+                    MessageRole.SUMMARY -> "Краткое содержание прошлых разговоров"
+                }
+                "$roleText: ${msg.content}"
+            }
+            
+            val summarizationPrompt = "Кратко суммируй следующий разговор, сохраняя ключевую информацию и контекст:\n\n$conversationText"
+            
+            // Call API for summarization (non-streaming)
+            val summaryMessages = listOf(
+                ChatMessageDto(role = "system", content = "Вы полезный ассистент, который создаёт краткие сводки разговоров сохраняя в том числе содержание прошлых разговоров."),
+                ChatMessageDto(role = "user", content = summarizationPrompt)
+            )
+            
+            var summaryContent = ""
+            chatApi.sendMessage(
+                messages = summaryMessages,
+                model = modelId,
+                stream = false,
+                onMetadata = null
+            ).collect { chunk ->
+                summaryContent += chunk
+            }
+            
+            if (summaryContent.isBlank()) {
+                Log.w(TAG, "Summary content is empty, skipping summarization")
+                return
+            }
+            
+            // Create summary message entity
+            val summaryMessage = ChatMessageEntity(
+                id = UUID.randomUUID().toString(),
+                content = "Chat history summarized",
+                role = MessageRole.SUMMARY,
+                timestamp = System.currentTimeMillis(),
+                sessionId = sessionId,
+                modelId = modelId,
+                summarizationContent = summaryContent.trim()
+            )
+            
+            // Insert summary message
+            database.chatMessageDao().insertMessage(summaryMessage)
+            
+            Log.d(TAG, "Summarization completed: ${summaryContent.length} characters")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during summarization", e)
+            // Don't throw - allow the conversation to continue even if summarization fails
+        }
     }
     
     /**

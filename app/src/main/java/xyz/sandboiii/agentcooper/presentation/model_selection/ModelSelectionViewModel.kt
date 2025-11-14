@@ -68,6 +68,22 @@ class ModelSelectionViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 preferencesManager.setSelectedModel(modelId)
+                
+                // Initialize default threshold to model's contextLength if not already set
+                val currentThreshold = preferencesManager.getTokenThreshold()
+                if (currentThreshold == null) {
+                    try {
+                        val models = chatApi.getModels()
+                        val model = models.find { it.id == modelId }
+                        model?.contextLength?.let { contextLength ->
+                            preferencesManager.setTokenThreshold(contextLength)
+                            Log.d(TAG, "Initialized token threshold to model context length: $contextLength")
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to initialize default threshold", e)
+                        // Don't fail model selection if threshold initialization fails
+                    }
+                }
             } catch (e: Exception) {
                 _state.value = ModelSelectionState.Error(
                     message = e.message ?: "Failed to select model"

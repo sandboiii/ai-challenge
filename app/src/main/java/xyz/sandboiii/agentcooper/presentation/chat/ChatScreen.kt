@@ -78,6 +78,7 @@ fun ChatScreen(
     val state by viewModel.state.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = ChatState.Loading)
     val modelInfo by viewModel.modelInfo.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = null)
     val welcomeMessageEnabled by viewModel.welcomeMessageEnabled.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = true)
+    val isSummarizing by viewModel.isSummarizing.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
     var messageText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
     var isInputFocused by remember { mutableStateOf(false) }
@@ -92,13 +93,7 @@ fun ChatScreen(
     // Helper function to scroll to bottom edge
     suspend fun scrollToBottomEdge(filteredMessages: List<*>) {
         if (filteredMessages.isEmpty()) return
-        
-        kotlinx.coroutines.delay(100) // Small delay to ensure layout is ready
-        // Scroll to last item
-        listState.animateScrollToItem(filteredMessages.size - 1)
-        // Wait for scroll animation to complete
-        kotlinx.coroutines.delay(100)
-        
+
         // Calculate total content height and scroll to bottom edge
         val layoutInfo = listState.layoutInfo
         var totalHeight = 0
@@ -123,40 +118,17 @@ fun ChatScreen(
             }
         }
     }
-    
-    // Scroll to bottom when new messages arrive
-    LaunchedEffect(state, welcomeMessageEnabled) {
-        if (state is ChatState.Success) {
-            val messages = (state as ChatState.Success).messages
-            val filteredMessages = if (welcomeMessageEnabled) {
-                messages
-            } else {
-                messages.filter { !it.id.startsWith("welcome-") }
-            }
-            if (filteredMessages.isNotEmpty()) {
-                scrollToBottomEdge(filteredMessages)
-            }
-        }
-    }
-    
-    // Scroll to bottom when keyboard appears or message text changes
-    LaunchedEffect(messageText, welcomeMessageEnabled) {
-        if (messageText.isNotEmpty()) {
-            val currentState = state
-            if (currentState is ChatState.Success) {
-                val messages = currentState.messages
-                val filteredMessages = if (welcomeMessageEnabled) {
-                    messages
-                } else {
-                    messages.filter { !it.id.startsWith("welcome-") }
-                }
-                if (filteredMessages.isNotEmpty()) {
-                    scrollToBottomEdge(filteredMessages)
+
+    // Use snapshotFlow to observe state changes and scroll to bottom when state is Success
+    LaunchedEffect(Unit) {
+        snapshotFlow { state }
+            .collect { currentState ->
+                if (currentState is ChatState.Success) {
+                    scrollToBottomEdge(currentState.messages)
                 }
             }
-        }
     }
-    
+
     // Scroll to bottom when input field gets focus (keyboard opens)
     LaunchedEffect(isInputFocused) {
         if (isInputFocused) {
@@ -280,12 +252,32 @@ fun ChatScreen(
                         }
                         
                         // Loading indicator when waiting for response
-                        // Only show thinking animation if we're waiting for response AND there's no streaming message
-                        // Once streaming starts (even with empty content), show the streaming message instead
+                        // Show summarization animation if summarizing, otherwise show thinking animation
                         val hasStreamingMessage = filteredMessages.any { it.id == "streaming" }
-                        val shouldShowThinking = currentState.isWaitingForResponse && !hasStreamingMessage
+                        val shouldShowThinking = currentState.isWaitingForResponse && !hasStreamingMessage && !isSummarizing
                         
-                        if (shouldShowThinking) {
+                        if (isSummarizing) {
+                            item {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 8.dp, horizontal = 16.dp),
+                                    horizontalArrangement = Arrangement.Start,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Суммирование истории чата...",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        } else if (shouldShowThinking) {
                             item {
                                 LoadingIndicator()
                             }
@@ -321,6 +313,8 @@ fun MessageBubble(
     isStreaming: Boolean
 ) {
     val isUser = message.role == MessageRole.USER
+    val isSummary = message.role == MessageRole.SUMMARY
+    var isSummaryExpanded by remember(message.id) { mutableStateOf(false) }
     
     val slideIn = remember {
         slideInHorizontally(
@@ -352,63 +346,104 @@ fun MessageBubble(
                     modifier = Modifier
                         .widthIn(max = 280.dp)
                         .clip(RoundedCornerShape(16.dp)),
-                    color = if (isUser) {
-                        // Use a darker, more contrasting color for user messages
-                        // This ensures white text is always visible
-                        Color(0xFF6200EE) // Material Design Purple 700
-                    } else {
-                        MaterialTheme.colorScheme.surfaceVariant
+                    color = when {
+                        isUser -> Color(0xFF6200EE) // Material Design Purple 700
+                        isSummary -> MaterialTheme.colorScheme.primaryContainer
+                        else -> MaterialTheme.colorScheme.surfaceVariant
                     },
                     tonalElevation = 2.dp
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            if (isStreaming) {
-                                // Debug logging
-                                android.util.Log.d("MessageBubble", "Streaming message - id: ${message.id}, content length: ${message.content.length}, content preview: ${message.content.take(100)}")
+                        // Special handling for summary messages
+                        if (isSummary) {
+                            Text(
+                                text = message.content, // "Chat history summarized"
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            
+                            message.summarizationContent?.let { summaryContent ->
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Button(
+                                    onClick = { isSummaryExpanded = !isSummaryExpanded },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = Color.White
+                                    )
+                                ) {
+                                    Text(
+                                        text = if (isSummaryExpanded) "Скрыть сводку" else "Показать сводку",
+                                        style = MaterialTheme.typography.labelMedium
+                                    )
+                                }
                                 
-                                // Show animated typing text when streaming
-                                // Use stable message id as key - don't include length to avoid resetting
-                                AnimatedTypingText(
-                                    key = message.id,
-                                    fullText = message.content,
-                                    textColor = if (isUser) {
-                                        Color.White
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurface
-                                    },
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                                
-                                Spacer(modifier = Modifier.width(2.dp))
-                                TypingCursor(
-                                    color = if (isUser) {
-                                        Color.White
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurface
+                                if (isSummaryExpanded) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Surface(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        color = MaterialTheme.colorScheme.surface,
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text(
+                                            text = parseMarkdown(summaryContent),
+                                            modifier = Modifier.padding(12.dp),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
                                     }
-                                )
-                            } else {
-                                // Show full text when not streaming
-                                Text(
-                                    text = parseMarkdown(message.content),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = if (isUser) {
-                                        // Always use white on user message bubbles for maximum contrast
-                                        Color.White
-                                    } else {
-                                        // Use onSurface for better contrast on surfaceVariant
-                                        MaterialTheme.colorScheme.onSurface
-                                    }
-                                )
+                                }
+                            }
+                        } else {
+                            // Regular message content
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                if (isStreaming) {
+                                    // Debug logging
+                                    android.util.Log.d("MessageBubble", "Streaming message - id: ${message.id}, content length: ${message.content.length}, content preview: ${message.content.take(100)}")
+                                    
+                                    // Show animated typing text when streaming
+                                    // Use stable message id as key - don't include length to avoid resetting
+                                    AnimatedTypingText(
+                                        key = message.id,
+                                        fullText = message.content,
+                                        textColor = if (isUser) {
+                                            Color.White
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurface
+                                        },
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    
+                                    Spacer(modifier = Modifier.width(2.dp))
+                                    TypingCursor(
+                                        color = if (isUser) {
+                                            Color.White
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurface
+                                        }
+                                    )
+                                } else {
+                                    // Show full text when not streaming
+                                    Text(
+                                        text = parseMarkdown(message.content),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = if (isUser) {
+                                            // Always use white on user message bubbles for maximum contrast
+                                            Color.White
+                                        } else {
+                                            // Use onSurface for better contrast on surfaceVariant
+                                            MaterialTheme.colorScheme.onSurface
+                                        }
+                                    )
+                                }
                             }
                         }
                         
-                        // Show response metadata for assistant messages
-                        if (!isUser && !isStreaming && (
+                        // Show response metadata for assistant messages (not for summary messages)
+                        if (!isUser && !isSummary && !isStreaming && (
                             message.modelId != null ||
                             message.responseTimeMs != null ||
                             message.promptTokens != null ||
@@ -1028,26 +1063,17 @@ fun AnimatedTypingText(
     SideEffect {
         val oldLength = fullTextState.value.length
         fullTextState.value = fullText
-        if (fullText.length != oldLength) {
-            android.util.Log.d("AnimatedTypingText", "fullTextState updated - key: $key, old length: $oldLength, new length: ${fullText.length}, displayedText length: ${displayedText.length}")
-        }
     }
     
     // Continuous animation loop that observes fullTextState changes via snapshotFlow
     LaunchedEffect(key) {
-        android.util.Log.d("AnimatedTypingText", "Starting animation loop for key: $key, initial fullText length: ${fullTextState.value.length}")
-        
         // Use snapshotFlow to observe fullTextState changes
         snapshotFlow { fullTextState.value }
             .collect { targetText ->
-                android.util.Log.d("AnimatedTypingText", "snapshotFlow emitted - targetText length: ${targetText.length}, displayedText length: ${displayedText.length}")
-                
                 // Animate from current displayed position to target length
                 while (displayedText.length < targetText.length) {
                     val nextChar = targetText[displayedText.length]
                     displayedText += nextChar
-                    
-                    android.util.Log.v("AnimatedTypingText", "Displayed char: '$nextChar', displayedText length now: ${displayedText.length}, target length: ${targetText.length}")
                     
                     // Variable delay based on character type for more natural typing
                     val delay = when {
@@ -1062,7 +1088,6 @@ fun AnimatedTypingText(
                     // Check if targetText has changed (new chunk arrived) - if so, break and let snapshotFlow handle it
                     val currentTarget = fullTextState.value
                     if (currentTarget.length > targetText.length) {
-                        android.util.Log.d("AnimatedTypingText", "Target text changed during animation (new chunk), breaking to handle new target")
                         break
                     }
                 }

@@ -6,7 +6,8 @@ data class MessageMetadata(
     val modelId: String? = null,
     val promptTokens: Int? = null,
     val completionTokens: Int? = null,
-    val totalTokens: Int? = null
+    val totalTokens: Int? = null,
+    val cost: Double? = null // Cost in credits from OpenRouter usage accounting
 )
 
 interface ChatApi {

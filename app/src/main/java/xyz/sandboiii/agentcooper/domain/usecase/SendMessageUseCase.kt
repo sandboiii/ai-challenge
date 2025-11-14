@@ -14,4 +14,3 @@ class SendMessageUseCase(
         return chatRepository.sendMessage(sessionId, content, modelId)
     }
 }
-

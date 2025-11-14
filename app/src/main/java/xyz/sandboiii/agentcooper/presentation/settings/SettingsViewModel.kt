@@ -45,10 +45,17 @@ class SettingsViewModel @Inject constructor(
     private val _deleteSessionsSuccess = MutableStateFlow(false)
     val deleteSessionsSuccess: StateFlow<Boolean> = _deleteSessionsSuccess.asStateFlow()
     
+    private val _tokenThreshold = MutableStateFlow<String>("")
+    val tokenThreshold: StateFlow<String> = _tokenThreshold.asStateFlow()
+    
+    private val _saveTokenThresholdSuccess = MutableStateFlow(false)
+    val saveTokenThresholdSuccess: StateFlow<Boolean> = _saveTokenThresholdSuccess.asStateFlow()
+    
     init {
         loadApiKey()
         loadSystemPrompt()
         loadWelcomeMessageEnabled()
+        loadTokenThreshold()
     }
     
     private fun loadApiKey() {
@@ -185,6 +192,55 @@ class SettingsViewModel @Inject constructor(
                 _errorMessage.value = "Ошибка сохранения настроек приветственного сообщения: ${e.message}"
             }
         }
+    }
+    
+    private fun loadTokenThreshold() {
+        viewModelScope.launch {
+            try {
+                val threshold = preferencesManager.getTokenThreshold()
+                _tokenThreshold.value = threshold?.toString() ?: ""
+            } catch (e: Exception) {
+                _errorMessage.value = "Ошибка загрузки порога токенов: ${e.message}"
+                _tokenThreshold.value = ""
+            }
+        }
+    }
+    
+    fun updateTokenThreshold(threshold: String) {
+        _tokenThreshold.value = threshold
+    }
+    
+    fun saveTokenThreshold() {
+        viewModelScope.launch {
+            _isLoading.value = true
+            _errorMessage.value = null
+            _saveTokenThresholdSuccess.value = false
+            
+            try {
+                val thresholdText = _tokenThreshold.value.trim()
+                if (thresholdText.isBlank()) {
+                    _errorMessage.value = "Порог токенов не может быть пустым"
+                    return@launch
+                }
+                
+                val threshold = thresholdText.toIntOrNull()
+                if (threshold == null || threshold <= 0) {
+                    _errorMessage.value = "Порог токенов должен быть положительным числом"
+                    return@launch
+                }
+                
+                preferencesManager.setTokenThreshold(threshold)
+                _saveTokenThresholdSuccess.value = true
+            } catch (e: Exception) {
+                _errorMessage.value = "Ошибка сохранения порога токенов: ${e.message}"
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+    
+    fun clearSaveTokenThresholdSuccess() {
+        _saveTokenThresholdSuccess.value = false
     }
 }
 

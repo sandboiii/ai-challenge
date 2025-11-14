@@ -7,7 +7,13 @@ data class OpenRouterRequest(
     val model: String,
     val messages: List<OpenRouterMessage>,
     val stream: Boolean = true,
-    val temperature: Double? = null
+    val temperature: Double? = null,
+    val usage: UsageRequest? = null
+)
+
+@Serializable
+data class UsageRequest(
+    val include: Boolean // No default value to ensure it's always serialized
 )
 
 @Serializable

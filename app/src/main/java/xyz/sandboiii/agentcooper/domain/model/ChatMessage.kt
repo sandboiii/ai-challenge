@@ -11,12 +11,14 @@ data class ChatMessage(
     val promptTokens: Int? = null, // Number of prompt tokens
     val completionTokens: Int? = null, // Number of completion tokens
     val contextWindowUsedPercent: Double? = null, // Percentage of context window used
-    val totalCost: Double? = null // Total cost in dollars
+    val totalCost: Double? = null, // Total cost in dollars
+    val summarizationContent: String? = null // Summary text (only for SUMMARY role messages)
 )
 
 enum class MessageRole {
     USER,
     ASSISTANT,
-    SYSTEM
+    SYSTEM,
+    SUMMARY
 }
 

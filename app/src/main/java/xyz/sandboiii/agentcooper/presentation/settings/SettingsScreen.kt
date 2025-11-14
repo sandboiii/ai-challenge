@@ -43,12 +43,15 @@ fun SettingsScreen(
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = null)
     val isDeletingSessions by viewModel.isDeletingSessions.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
     val deleteSessionsSuccess by viewModel.deleteSessionsSuccess.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
+    val tokenThreshold by viewModel.tokenThreshold.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = "")
+    val saveTokenThresholdSuccess by viewModel.saveTokenThresholdSuccess.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
     
     var showDeleteConfirmation by remember { mutableStateOf(false) }
     
     // Initialize local state only once, sync when needed
     var localApiKey by remember { mutableStateOf("") }
     var localSystemPrompt by remember { mutableStateOf("") }
+    var localTokenThreshold by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
     
@@ -86,6 +89,12 @@ fun SettingsScreen(
         }
     }
     
+    LaunchedEffect(tokenThreshold) {
+        if (localTokenThreshold != tokenThreshold) {
+            localTokenThreshold = tokenThreshold
+        }
+    }
+    
     // Optimize success message clearing - only trigger when value becomes true
     LaunchedEffect(saveSuccess) {
         if (saveSuccess) {
@@ -105,6 +114,13 @@ fun SettingsScreen(
         if (deleteSessionsSuccess) {
             kotlinx.coroutines.delay(2000)
             viewModel.clearDeleteSessionsSuccess()
+        }
+    }
+    
+    LaunchedEffect(saveTokenThresholdSuccess) {
+        if (saveTokenThresholdSuccess) {
+            kotlinx.coroutines.delay(2000)
+            viewModel.clearSaveTokenThresholdSuccess()
         }
     }
     
@@ -383,6 +399,97 @@ fun SettingsScreen(
                                 uncheckedTrackColor = Color(0xFFE0E0E0)
                             )
                         )
+                    }
+                }
+            }
+            
+            // Token Threshold Section
+            Card(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "Порог токенов для суммирования",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    
+                    Text(
+                        text = "Когда количество токенов в истории чата превышает этот порог, старые сообщения будут автоматически суммированы для экономии контекста. По умолчанию используется размер контекстного окна модели.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    
+                    CompositionLocalProvider(LocalTextSelectionColors provides textSelectionColors) {
+                        OutlinedTextField(
+                            value = localTokenThreshold,
+                            onValueChange = { 
+                                localTokenThreshold = it
+                            },
+                            label = { Text("Порог токенов") },
+                            placeholder = { Text("Например: 8000") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            enabled = !isLoading,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(
+                                onDone = {
+                                    keyboardController?.hide()
+                                    viewModel.saveTokenThreshold()
+                                }
+                            ),
+                            isError = errorMessage != null,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                focusedBorderColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                                focusedLabelColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                focusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                unfocusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        )
+                    }
+                    
+                    if (saveTokenThresholdSuccess) {
+                        Text(
+                            text = "Порог токенов успешно сохранён",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    
+                    Button(
+                        onClick = {
+                            keyboardController?.hide()
+                            viewModel.updateTokenThreshold(localTokenThreshold)
+                            viewModel.saveTokenThreshold()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isLoading && localTokenThreshold.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF6200EE),
+                            contentColor = Color.White,
+                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    ) {
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = Color.White
+                            )
+                        } else {
+                            Text(
+                                "Сохранить порог",
+                                color = Color.White
+                            )
+                        }
                     }
                 }
             }

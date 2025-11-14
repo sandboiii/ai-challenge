@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
@@ -39,6 +40,9 @@ class ChatViewModel @Inject constructor(
     
     private val _modelInfo = MutableStateFlow<ModelInfo?>(null)
     val modelInfo: StateFlow<ModelInfo?> = _modelInfo.asStateFlow()
+    
+    // Observe summarization state from ChatRepository
+    val isSummarizing: StateFlow<Boolean> = chatRepository.isSummarizing
     
     val welcomeMessageEnabled = preferencesManager.welcomeMessageEnabled
     
@@ -200,8 +204,41 @@ class ChatViewModel @Inject constructor(
                 var hasError = false
                 var errorMessage: String? = null
                 var hasReceivedFirstChunk = false
+                var previousSummarizingState = chatRepository.isSummarizing.value
                 
-                sendMessageUseCase(sessionId, content, modelId)
+                // Observe summarization state changes to reload messages when summarization completes
+                viewModelScope.launch {
+                    chatRepository.isSummarizing.collect { isSummarizing ->
+                        // When summarization completes, reload messages to show the summary message immediately
+                        if (previousSummarizingState && !isSummarizing) {
+                            Log.d(TAG, "Summarization complete, reloading messages to show summary")
+                            // Reload messages to get the summary message from database
+                            // We need to do this in a way that doesn't interfere with streaming
+                            try {
+                                val updatedMessages = getMessagesUseCase(sessionId).first()
+                                val stateSnapshot = _state.value
+                                if (stateSnapshot is ChatState.Success) {
+                                    // Update messages but preserve streaming state and waiting state
+                                    _state.value = stateSnapshot.copy(
+                                        messages = updatedMessages,
+                                        // Keep isWaitingForResponse true if we're still waiting for the API response
+                                        isWaitingForResponse = stateSnapshot.isWaitingForResponse
+                                    )
+                                    Log.d(TAG, "Updated messages after summarization: ${updatedMessages.size} messages")
+                                }
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Failed to reload messages after summarization", e)
+                            }
+                        }
+                        previousSummarizingState = isSummarizing
+                    }
+                }
+                
+                sendMessageUseCase(
+                    sessionId, 
+                    content, 
+                    modelId
+                )
                     .catch { e ->
                         hasError = true
                         errorMessage = e.message ?: "Failed to send message"

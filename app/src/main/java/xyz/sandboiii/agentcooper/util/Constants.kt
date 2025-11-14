@@ -12,6 +12,7 @@ object Constants {
     const val PREF_SYSTEM_PROMPT = "system_prompt"
     const val PREF_WELCOME_MESSAGE_ENABLED = "welcome_message_enabled"
     const val PREF_TEMPERATURE = "temperature"
+    const val PREF_TOKEN_THRESHOLD = "token_threshold"
     const val PREF_DATASTORE_NAME = "agent_cooper_prefs"
     
     const val DEFAULT_TEMPERATURE = 0.7f
