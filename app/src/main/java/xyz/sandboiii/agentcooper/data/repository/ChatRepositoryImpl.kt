@@ -19,10 +19,16 @@ import xyz.sandboiii.agentcooper.data.remote.api.ChatMessageDto
 import xyz.sandboiii.agentcooper.domain.model.ChatMessage
 import xyz.sandboiii.agentcooper.domain.model.MessageRole
 import xyz.sandboiii.agentcooper.domain.repository.ChatRepository
+import xyz.sandboiii.agentcooper.domain.repository.McpRepository
 import xyz.sandboiii.agentcooper.domain.repository.SessionRepository
 import xyz.sandboiii.agentcooper.util.Constants
 import xyz.sandboiii.agentcooper.util.PreferencesManager
 import xyz.sandboiii.agentcooper.util.TokenCounter
+import xyz.sandboiii.agentcooper.data.remote.mcp.toOpenAITool
+import xyz.sandboiii.agentcooper.data.remote.dto.ToolCall
+import xyz.sandboiii.agentcooper.data.remote.api.ToolCallInfo
+import kotlinx.serialization.json.*
+import kotlinx.coroutines.flow.first
 
 import javax.inject.Inject
 
@@ -30,11 +36,18 @@ class ChatRepositoryImpl @Inject constructor(
     private val chatApi: ChatApi,
     private val sessionFileStorage: SessionFileStorage,
     private val sessionRepository: SessionRepository,
-    private val preferencesManager: PreferencesManager
+    private val preferencesManager: PreferencesManager,
+    private val mcpRepository: McpRepository
 ) : ChatRepository {
     
     companion object {
         private const val TAG = "ChatRepositoryImpl"
+    }
+    
+    private val json = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+        encodeDefaults = false
     }
     
     private val _isSummarizing = MutableStateFlow(false)
@@ -108,7 +121,7 @@ class ChatRepositoryImpl @Inject constructor(
         // Log token counting info
         val userMessageCount = initialMessages.count { it.role == "user" }
         val assistantMessageCount = initialMessages.count { it.role == "assistant" }
-        val summaryCount = initialMessages.count { it.role == "system" && it.content.startsWith("Краткое содержание") }
+        val summaryCount = initialMessages.count { it.role == "system" && it.content?.startsWith("Краткое содержание") == true }
         Log.d(TAG, "Token counting: 1 system prompt, ${summaryCount} summary (if present), ${userMessageCount} user messages, ${assistantMessageCount} assistant messages")
         
         // Check token count and trigger summarization if needed (BEFORE saving user message)
@@ -185,7 +198,9 @@ class ChatRepositoryImpl @Inject constructor(
         // Create assistant message entity
         val assistantMessageId = UUID.randomUUID().toString()
         var accumulatedContent = ""
-        
+        var accumulatedToolCalls = mutableListOf<xyz.sandboiii.agentcooper.domain.model.ToolCall>()
+        var toolResults = mutableListOf<xyz.sandboiii.agentcooper.domain.model.ToolResult>()
+
         // Track response time and metadata
         val startTime = System.currentTimeMillis()
         var responseModelId: String? = null
@@ -193,9 +208,27 @@ class ChatRepositoryImpl @Inject constructor(
         var completionTokens: Int? = null
         var totalTokens: Int? = null
         var apiCost: Double? = null // Cost from API usage accounting
-        
-        // Stream response from API with metadata callback
+
+        // Get available tools from MCP
+        val mcpTools = try {
+            mcpRepository.allTools.first()
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to get MCP tools", e)
+            emptyList()
+        }
+
+        val openAITools = if (mcpTools.isNotEmpty()) {
+            mcpTools.map { it.toOpenAITool() }
+        } else {
+            null
+        }
+
+        Log.d(TAG, "Available MCP tools: ${mcpTools.size}")
+
+        // Stream response from API with metadata callback and tool calling support
         try {
+            var allToolCalls = mutableListOf<ToolCallInfo>()
+            
             chatApi.sendMessage(
                 messages, 
                 modelId, 
@@ -208,10 +241,147 @@ class ChatRepositoryImpl @Inject constructor(
                     totalTokens = metadata.totalTokens
                     apiCost = metadata.cost
                     Log.d(TAG, "Updated token variables: prompt=$promptTokens, completion=$completionTokens, total=$totalTokens, apiCost=$apiCost")
+                },
+                tools = openAITools,
+                onToolCalls = { toolCalls ->
+                    Log.d(TAG, "Received tool calls: ${toolCalls.size}")
+                    allToolCalls.addAll(toolCalls)
                 }
             ).collect { chunk ->
-                accumulatedContent += chunk
-                emit(chunk)
+                // Handle content chunks
+                chunk.content?.let { content ->
+                    accumulatedContent += content
+                    emit(content)
+                }
+                
+                // Handle tool calls
+                chunk.toolCalls?.let { toolCalls ->
+                    val domainToolCalls = toolCalls.map { toolCall ->
+                        xyz.sandboiii.agentcooper.domain.model.ToolCall(
+                            id = toolCall.id,
+                            name = toolCall.name,
+                            arguments = toolCall.arguments
+                        )
+                    }
+                    accumulatedToolCalls.addAll(domainToolCalls)
+                    Log.d(TAG, "Accumulated ${accumulatedToolCalls.size} tool calls")
+                }
+            }
+            
+            // Execute tool calls if any
+            if (accumulatedToolCalls.isNotEmpty()) {
+                Log.d(TAG, "Executing ${accumulatedToolCalls.size} tool calls")
+                
+                // Execute each tool call via MCP
+                for (toolCall in accumulatedToolCalls) {
+                    try {
+                        Log.d(TAG, "Executing tool: ${toolCall.name} with args: ${toolCall.arguments}")
+                        
+                        // Parse arguments JSON
+                        val argumentsJson = try {
+                            json.parseToJsonElement(toolCall.arguments)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to parse tool arguments", e)
+                            toolResults.add(xyz.sandboiii.agentcooper.domain.model.ToolResult(
+                                toolCallId = toolCall.id,
+                                toolName = toolCall.name,
+                                result = "Error: Failed to parse arguments: ${e.message}",
+                                isError = true
+                            ))
+                            continue
+                        }
+                        
+                        // Call tool via MCP repository
+                        val result = mcpRepository.callTool(toolCall.name, argumentsJson)
+                        
+                        result.fold(
+                            onSuccess = { resultText ->
+                                Log.d(TAG, "Tool ${toolCall.name} executed successfully")
+                                toolResults.add(xyz.sandboiii.agentcooper.domain.model.ToolResult(
+                                    toolCallId = toolCall.id,
+                                    toolName = toolCall.name,
+                                    result = resultText,
+                                    isError = false
+                                ))
+                            },
+                            onFailure = { error ->
+                                Log.e(TAG, "Tool ${toolCall.name} execution failed", error)
+                                toolResults.add(xyz.sandboiii.agentcooper.domain.model.ToolResult(
+                                    toolCallId = toolCall.id,
+                                    toolName = toolCall.name,
+                                    result = "Error: ${error.message}",
+                                    isError = true
+                                ))
+                            }
+                        )
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Exception executing tool ${toolCall.name}", e)
+                        toolResults.add(xyz.sandboiii.agentcooper.domain.model.ToolResult(
+                            toolCallId = toolCall.id,
+                            toolName = toolCall.name,
+                            result = "Error: ${e.message}",
+                            isError = true
+                        ))
+                    }
+                }
+                
+                // Send tool results back to OpenRouter and get final response
+                if (toolResults.isNotEmpty()) {
+                    Log.d(TAG, "Sending ${toolResults.size} tool results back to OpenRouter")
+                    
+                    // Build messages with tool results
+                    // We need to add the assistant message with tool_calls and then tool result messages
+                    val messagesWithToolResults = messages.toMutableList().apply {
+                        // Add assistant message with tool calls
+                        val toolCallsForMessage = accumulatedToolCalls.map { toolCall ->
+                            ToolCallInfo(
+                                id = toolCall.id,
+                                name = toolCall.name,
+                                arguments = toolCall.arguments
+                            )
+                        }
+                        add(ChatMessageDto(
+                            role = "assistant",
+                            content = "", // Empty content when tool calls are present
+                            toolCallId = null,
+                            toolCalls = toolCallsForMessage
+                        ))
+                        
+                        // Add tool result messages
+                        toolResults.forEach { toolResult ->
+                            add(ChatMessageDto(
+                                role = "tool",
+                                content = toolResult.result,
+                                toolCallId = toolResult.toolCallId,
+                                toolCalls = null
+                            ))
+                        }
+                    }
+                    
+                    // Get final response from OpenRouter
+                    var finalContent = ""
+                    chatApi.sendMessage(
+                        messagesWithToolResults,
+                        modelId,
+                        stream = true,
+                        onMetadata = { metadata ->
+                            responseModelId = metadata.modelId ?: modelId
+                            promptTokens = (promptTokens ?: 0) + (metadata.promptTokens ?: 0)
+                            completionTokens = (completionTokens ?: 0) + (metadata.completionTokens ?: 0)
+                            totalTokens = (totalTokens ?: 0) + (metadata.totalTokens ?: 0)
+                            apiCost = (apiCost ?: 0.0) + (metadata.cost ?: 0.0)
+                        },
+                        tools = openAITools,
+                        onToolCalls = null // Don't handle nested tool calls for now
+                    ).collect { chunk ->
+                        chunk.content?.let { content ->
+                            finalContent += content
+                            emit(content)
+                        }
+                    }
+                    
+                    accumulatedContent = finalContent
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error streaming message", e)
@@ -334,20 +504,22 @@ class ChatRepositoryImpl @Inject constructor(
             Log.w(TAG, "Failed to calculate context window usage", e)
         }
         
-        // Save assistant message
-        val assistantMessage = ChatMessage(
-            id = assistantMessageId,
-            content = messageContent,
-            role = MessageRole.ASSISTANT,
-            timestamp = System.currentTimeMillis(),
-            sessionId = sessionId,
-            modelId = responseModelId ?: modelId,
-            responseTimeMs = responseTimeMs,
-            promptTokens = promptTokens,
-            completionTokens = completionTokens,
-            contextWindowUsedPercent = contextWindowUsedPercent,
-            totalCost = totalCost
-        )
+            // Save assistant message
+            val assistantMessage = ChatMessage(
+                id = assistantMessageId,
+                content = messageContent,
+                role = MessageRole.ASSISTANT,
+                timestamp = System.currentTimeMillis(),
+                sessionId = sessionId,
+                modelId = responseModelId ?: modelId,
+                responseTimeMs = responseTimeMs,
+                promptTokens = promptTokens,
+                completionTokens = completionTokens,
+                contextWindowUsedPercent = contextWindowUsedPercent,
+                totalCost = totalCost,
+                toolCalls = if (accumulatedToolCalls.isNotEmpty()) accumulatedToolCalls else null,
+                toolResults = if (toolResults.isNotEmpty()) toolResults else null
+            )
         sessionFileStorage.addMessageToSession(session, assistantMessage, storageLocation)
         
         // Generate title from API if this is the first user message

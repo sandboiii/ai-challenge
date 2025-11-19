@@ -26,6 +26,7 @@ class PreferencesManager @Inject constructor(
         private val TEMPERATURE = floatPreferencesKey(Constants.PREF_TEMPERATURE)
         private val TOKEN_THRESHOLD = intPreferencesKey(Constants.PREF_TOKEN_THRESHOLD)
         private val STORAGE_LOCATION = stringPreferencesKey(Constants.PREF_STORAGE_LOCATION)
+        private val MCP_SERVERS = stringPreferencesKey("mcp_servers")
     }
     
     val apiKey: Flow<String?> = dataStore.data.map { it[API_KEY] }
@@ -116,6 +117,16 @@ class PreferencesManager @Inject constructor(
             } else {
                 preferences.remove(STORAGE_LOCATION)
             }
+        }
+    }
+    
+    suspend fun getMcpServers(): String? {
+        return dataStore.data.first()[MCP_SERVERS]
+    }
+    
+    suspend fun setMcpServers(serversJson: String) {
+        dataStore.edit { preferences ->
+            preferences[MCP_SERVERS] = serversJson
         }
     }
 }

@@ -47,7 +47,7 @@ object TokenCounter {
                 val roleTokens = tokenizerInstance.encode(message.role).size
                 
                 // Count tokens for content
-                val contentTokens = tokenizerInstance.encode(message.content).size
+                val contentTokens = message.content?.let { tokenizerInstance.encode(it).size } ?: 0
                 
                 // Add overhead for message structure (typically 3-4 tokens per message)
                 // This accounts for the JSON structure and formatting
@@ -95,7 +95,7 @@ object TokenCounter {
     private fun approximateTokenCount(messages: List<ChatMessageDto>): Int {
         var totalChars = 0
         for (message in messages) {
-            totalChars += message.role.length + message.content.length
+            totalChars += message.role.length + (message.content?.length ?: 0)
             // Add overhead for message structure
             totalChars += 20 // Approximate overhead for JSON structure
         }

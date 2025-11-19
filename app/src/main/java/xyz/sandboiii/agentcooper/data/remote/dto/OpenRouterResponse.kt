@@ -29,7 +29,8 @@ data class Choice(
 @Serializable
 data class Delta(
     val role: String? = null,
-    val content: String? = null
+    val content: String? = null,
+    val tool_calls: List<ToolCall>? = null
 )
 
 @Serializable
@@ -37,5 +38,18 @@ data class Error(
     val message: String,
     val type: String? = null,
     val code: Int? = null
+)
+
+@Serializable
+data class ToolCall(
+    val id: String? = null,
+    val type: String = "function",
+    val function: ToolCallFunction
+)
+
+@Serializable
+data class ToolCallFunction(
+    val name: String,
+    val arguments: String // JSON string
 )
 

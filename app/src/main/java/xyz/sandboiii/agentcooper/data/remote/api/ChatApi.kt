@@ -1,6 +1,7 @@
 package xyz.sandboiii.agentcooper.data.remote.api
 
 import kotlinx.coroutines.flow.Flow
+import xyz.sandboiii.agentcooper.data.remote.mcp.OpenAITool
 
 data class MessageMetadata(
     val modelId: String? = null,
@@ -10,13 +11,27 @@ data class MessageMetadata(
     val cost: Double? = null // Cost in credits from OpenRouter usage accounting
 )
 
+data class ToolCallInfo(
+    val id: String,
+    val name: String,
+    val arguments: String // JSON string
+)
+
+data class MessageChunk(
+    val content: String? = null,
+    val toolCalls: List<ToolCallInfo>? = null,
+    val finishReason: String? = null
+)
+
 interface ChatApi {
     suspend fun sendMessage(
         messages: List<ChatMessageDto>,
         model: String,
         stream: Boolean = true,
-        onMetadata: ((MessageMetadata) -> Unit)? = null // Callback to receive metadata
-    ): Flow<String>
+        onMetadata: ((MessageMetadata) -> Unit)? = null, // Callback to receive metadata
+        tools: List<OpenAITool>? = null, // Optional tools for function calling
+        onToolCalls: ((List<ToolCallInfo>) -> Unit)? = null // Callback to receive tool calls
+    ): Flow<MessageChunk>
     
     suspend fun getModels(): List<ModelDto>
     
@@ -33,7 +48,9 @@ interface ChatApi {
 
 data class ChatMessageDto(
     val role: String,
-    val content: String
+    val content: String? = null,
+    val toolCallId: String? = null,
+    val toolCalls: List<ToolCallInfo>? = null // Tool calls for assistant messages
 )
 
 data class ModelDto(

@@ -46,6 +46,21 @@ data class SessionMetadata(
  * Сериализуемая модель сообщения для хранения в JSON файле.
  */
 @Serializable
+data class ToolCallSerializable(
+    val id: String,
+    val name: String,
+    val arguments: String
+)
+
+@Serializable
+data class ToolResultSerializable(
+    val toolCallId: String,
+    val toolName: String,
+    val result: String,
+    val isError: Boolean = false
+)
+
+@Serializable
 data class ChatMessageSerializable(
     val id: String,
     val content: String,
@@ -58,7 +73,9 @@ data class ChatMessageSerializable(
     val completionTokens: Int? = null,
     val contextWindowUsedPercent: Double? = null,
     val totalCost: Double? = null,
-    val summarizationContent: String? = null
+    val summarizationContent: String? = null,
+    val toolCalls: List<ToolCallSerializable>? = null,
+    val toolResults: List<ToolResultSerializable>? = null
 ) {
     /**
      * Преобразует доменную модель ChatMessage в сериализуемую модель.
@@ -77,7 +94,13 @@ data class ChatMessageSerializable(
                 completionTokens = message.completionTokens,
                 contextWindowUsedPercent = message.contextWindowUsedPercent,
                 totalCost = message.totalCost,
-                summarizationContent = message.summarizationContent
+                summarizationContent = message.summarizationContent,
+                toolCalls = message.toolCalls?.map { 
+                    ToolCallSerializable(it.id, it.name, it.arguments) 
+                },
+                toolResults = message.toolResults?.map { 
+                    ToolResultSerializable(it.toolCallId, it.toolName, it.result, it.isError) 
+                }
             )
         }
     }
@@ -98,7 +121,13 @@ data class ChatMessageSerializable(
             completionTokens = completionTokens,
             contextWindowUsedPercent = contextWindowUsedPercent,
             totalCost = totalCost,
-            summarizationContent = summarizationContent
+            summarizationContent = summarizationContent,
+            toolCalls = toolCalls?.map { 
+                xyz.sandboiii.agentcooper.domain.model.ToolCall(it.id, it.name, it.arguments) 
+            },
+            toolResults = toolResults?.map { 
+                xyz.sandboiii.agentcooper.domain.model.ToolResult(it.toolCallId, it.toolName, it.result, it.isError) 
+            }
         )
     }
 }

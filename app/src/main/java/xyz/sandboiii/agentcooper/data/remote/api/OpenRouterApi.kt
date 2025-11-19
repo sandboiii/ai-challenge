@@ -52,15 +52,31 @@ class OpenRouterApi @Inject constructor(
         messages: List<ChatMessageDto>,
         model: String,
         stream: Boolean,
-        onMetadata: ((MessageMetadata) -> Unit)?
-    ): Flow<String> = flow {
+        onMetadata: ((MessageMetadata) -> Unit)?,
+        tools: List<xyz.sandboiii.agentcooper.data.remote.mcp.OpenAITool>?,
+        onToolCalls: ((List<ToolCallInfo>) -> Unit)?
+    ): Flow<MessageChunk> = flow {
         val apiKey = preferencesManager.getApiKey() 
             ?: throw IllegalStateException("API key not set. Please configure your OpenRouter API key.")
         
         val temperature = preferencesManager.getTemperature()
         
         val requestMessages = messages.map { 
-            OpenRouterMessage(role = it.role, content = it.content) 
+            OpenRouterMessage(
+                role = it.role, 
+                content = it.content,
+                tool_calls = it.toolCalls?.map { toolCall ->
+                    ToolCall(
+                        id = toolCall.id,
+                        type = "function",
+                        function = ToolCallFunction(
+                            name = toolCall.name,
+                            arguments = toolCall.arguments
+                        )
+                    )
+                },
+                tool_call_id = it.toolCallId
+            ) 
         }
         
         val request = OpenRouterRequest(
@@ -68,7 +84,9 @@ class OpenRouterApi @Inject constructor(
             messages = requestMessages,
             stream = stream,
             temperature = temperature.toDouble(),
-            usage = UsageRequest(include = true) // Enable usage accounting to get cost from API
+            usage = UsageRequest(include = true), // Enable usage accounting to get cost from API
+            tools = tools,
+            tool_choice = if (tools != null && tools.isNotEmpty()) "auto" else null
         )
         
         try {
@@ -115,6 +133,8 @@ class OpenRouterApi @Inject constructor(
                 var hasReceivedData = false
                 var lastResponseModel: String? = null
                 var lastUsage: Usage? = null
+                var accumulatedToolCalls = mutableListOf<ToolCallInfo>()
+                var finishReason: String? = null
                 
                 // First, try to parse as SSE format (lines starting with "data: ")
                 val lines = body.lines()
@@ -136,6 +156,11 @@ class OpenRouterApi @Inject constructor(
                                 cost = lastUsage?.cost
                             ))
                             Log.d(TAG, "Invoked metadata callback: model=$lastResponseModel, usage=$lastUsage, cost=${lastUsage?.cost}")
+                            
+                            // Emit any accumulated tool calls
+                            if (accumulatedToolCalls.isNotEmpty()) {
+                                onToolCalls?.invoke(accumulatedToolCalls)
+                            }
                             break
                         }
                         
@@ -153,18 +178,58 @@ class OpenRouterApi @Inject constructor(
                                     Log.d(TAG, "Captured usage: prompt=${jsonResponse.usage.prompt_tokens}, completion=${jsonResponse.usage.completion_tokens}, total=${jsonResponse.usage.total_tokens}, cost=${jsonResponse.usage.cost}")
                                 }
                                 
-                                // Try delta first (for streaming chunks)
-                                val deltaContent = jsonResponse.choices?.firstOrNull()?.delta?.content
+                                val choice = jsonResponse.choices?.firstOrNull()
+                                finishReason = choice?.finish_reason
+                                
+                                // Check for tool_calls in delta (streaming)
+                                val deltaToolCalls = choice?.delta?.tool_calls
+                                if (deltaToolCalls != null && deltaToolCalls.isNotEmpty()) {
+                                    hasReceivedData = true
+                                    val toolCalls = deltaToolCalls.mapNotNull { toolCall ->
+                                        toolCall.id?.let { id ->
+                                            ToolCallInfo(
+                                                id = id,
+                                                name = toolCall.function.name,
+                                                arguments = toolCall.function.arguments
+                                            )
+                                        }
+                                    }
+                                    accumulatedToolCalls.addAll(toolCalls)
+                                    Log.d(TAG, "Detected tool calls in delta: ${toolCalls.size}")
+                                    emit(MessageChunk(toolCalls = toolCalls))
+                                }
+                                
+                                // Check for tool_calls in message (complete response)
+                                val messageToolCalls = choice?.message?.tool_calls
+                                if (messageToolCalls != null && messageToolCalls.isNotEmpty()) {
+                                    hasReceivedData = true
+                                    val toolCalls = messageToolCalls.mapNotNull { toolCall ->
+                                        toolCall.id?.let { id ->
+                                            ToolCallInfo(
+                                                id = id,
+                                                name = toolCall.function.name,
+                                                arguments = toolCall.function.arguments
+                                            )
+                                        }
+                                    }
+                                    accumulatedToolCalls.addAll(toolCalls)
+                                    Log.d(TAG, "Detected tool calls in message: ${toolCalls.size}")
+                                    emit(MessageChunk(toolCalls = toolCalls, finishReason = finishReason))
+                                    onToolCalls?.invoke(toolCalls)
+                                }
+                                
+                                // Try delta content (for streaming chunks)
+                                val deltaContent = choice?.delta?.content
                                 if (!deltaContent.isNullOrEmpty()) {
                                     hasReceivedData = true
                                     Log.d(TAG, "Emitting delta chunk (length: ${deltaContent.length}): ${deltaContent.take(50)}...")
-                                    emit(deltaContent)
+                                    emit(MessageChunk(content = deltaContent))
                                 } else {
                                     // Try message field (for complete responses in SSE)
-                                    val messageContent = jsonResponse.choices?.firstOrNull()?.message?.content
+                                    val messageContent = choice?.message?.content
                                     if (!messageContent.isNullOrEmpty()) {
                                         Log.d(TAG, "Emitting complete message from SSE (length: ${messageContent.length}): ${messageContent.take(50)}...")
-                                        emit(messageContent)
+                                        emit(MessageChunk(content = messageContent, finishReason = finishReason))
                                         hasReceivedData = true
                                     } else if (jsonResponse.usage != null) {
                                         // If there's usage info but no content, this might be a final metadata-only message
@@ -235,18 +300,39 @@ class OpenRouterApi @Inject constructor(
                             ))
                         }
                         
+                        val choice = jsonResponse.choices?.firstOrNull()
+                        val finishReason = choice?.finish_reason
+                        
+                        // Check for tool_calls in message
+                        val messageToolCalls = choice?.message?.tool_calls
+                        if (messageToolCalls != null && messageToolCalls.isNotEmpty()) {
+                            val toolCalls = messageToolCalls.mapNotNull { toolCall ->
+                                toolCall.id?.let { id ->
+                                    ToolCallInfo(
+                                        id = id,
+                                        name = toolCall.function.name,
+                                        arguments = toolCall.function.arguments
+                                    )
+                                }
+                            }
+                            Log.d(TAG, "Detected tool calls in non-streaming response: ${toolCalls.size}")
+                            emit(MessageChunk(toolCalls = toolCalls, finishReason = finishReason))
+                            onToolCalls?.invoke(toolCalls)
+                            hasReceivedData = true
+                        }
+                        
                         // Try message field first (complete response)
-                        val messageContent = jsonResponse.choices?.firstOrNull()?.message?.content
+                        val messageContent = choice?.message?.content
                         if (!messageContent.isNullOrEmpty()) {
                             Log.d(TAG, "Emitting complete message from JSON (length: ${messageContent.length}): ${messageContent.take(50)}...")
-                            emit(messageContent)
+                            emit(MessageChunk(content = messageContent, finishReason = finishReason))
                             hasReceivedData = true
                         } else {
                             // Try delta as fallback
-                            val deltaContent = jsonResponse.choices?.firstOrNull()?.delta?.content
+                            val deltaContent = choice?.delta?.content
                             if (!deltaContent.isNullOrEmpty()) {
                                 Log.d(TAG, "Emitting delta from JSON (length: ${deltaContent.length}): ${deltaContent.take(50)}...")
-                                emit(deltaContent)
+                                emit(MessageChunk(content = deltaContent, finishReason = finishReason))
                                 hasReceivedData = true
                             } else {
                                 Log.w(TAG, "No content found in response. Choices: ${jsonResponse.choices}")
@@ -291,8 +377,28 @@ class OpenRouterApi @Inject constructor(
                     Log.d(TAG, "Non-streaming metadata: cost=${jsonResponse.usage?.cost}")
                 }
                 
-                jsonResponse.choices?.firstOrNull()?.message?.content?.let { content ->
-                    emit(content)
+                val choice = jsonResponse.choices?.firstOrNull()
+                val finishReason = choice?.finish_reason
+                
+                // Check for tool_calls
+                val messageToolCalls = choice?.message?.tool_calls
+                if (messageToolCalls != null && messageToolCalls.isNotEmpty()) {
+                    val toolCalls = messageToolCalls.mapNotNull { toolCall ->
+                        toolCall.id?.let { id ->
+                            ToolCallInfo(
+                                id = id,
+                                name = toolCall.function.name,
+                                arguments = toolCall.function.arguments
+                            )
+                        }
+                    }
+                    Log.d(TAG, "Detected tool calls in non-streaming response: ${toolCalls.size}")
+                    emit(MessageChunk(toolCalls = toolCalls, finishReason = finishReason))
+                    onToolCalls?.invoke(toolCalls)
+                }
+                
+                choice?.message?.content?.let { content ->
+                    emit(MessageChunk(content = content, finishReason = finishReason))
                 } ?: run {
                     Log.w(TAG, "No content in non-streaming response")
                 }

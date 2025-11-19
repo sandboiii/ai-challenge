@@ -10,6 +10,7 @@ import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import xyz.sandboiii.agentcooper.presentation.chat.ChatScreen
+import xyz.sandboiii.agentcooper.presentation.mcp.McpManagerScreen
 import xyz.sandboiii.agentcooper.presentation.model_selection.ModelSelectionScreen
 import xyz.sandboiii.agentcooper.presentation.sessions.SessionsScreen
 import xyz.sandboiii.agentcooper.presentation.settings.SettingsScreen
@@ -27,6 +28,7 @@ sealed class Screen(val route: String) {
     }
     data object ModelSelection : Screen("model_selection")
     data object Settings : Screen("settings")
+    data object McpManager : Screen("mcp_manager")
 }
 
 @Composable
@@ -69,7 +71,10 @@ fun NavGraph(
             ChatScreen(
                 sessionId = sessionId,
                 modelId = modelId,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToMcpManager = {
+                    navController.navigate(Screen.McpManager.route)
+                }
             )
         }
         
@@ -86,6 +91,12 @@ fun NavGraph(
                 onNavigateBack = {
                     navController.popBackStack()
                 }
+            )
+        }
+        
+        composable(Screen.McpManager.route) {
+            McpManagerScreen(
+                onNavigateBack = { navController.popBackStack() }
             )
         }
     }

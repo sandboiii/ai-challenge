@@ -12,7 +12,22 @@ data class ChatMessage(
     val completionTokens: Int? = null, // Number of completion tokens
     val contextWindowUsedPercent: Double? = null, // Percentage of context window used
     val totalCost: Double? = null, // Total cost in dollars
-    val summarizationContent: String? = null // Summary text (only for SUMMARY role messages)
+    val summarizationContent: String? = null, // Summary text (only for SUMMARY role messages)
+    val toolCalls: List<ToolCall>? = null, // Tool calls made by the assistant
+    val toolResults: List<ToolResult>? = null // Results from tool executions
+)
+
+data class ToolCall(
+    val id: String,
+    val name: String,
+    val arguments: String // JSON string
+)
+
+data class ToolResult(
+    val toolCallId: String,
+    val toolName: String,
+    val result: String,
+    val isError: Boolean = false
 )
 
 enum class MessageRole {
