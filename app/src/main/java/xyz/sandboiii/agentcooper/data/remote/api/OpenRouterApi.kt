@@ -157,8 +157,9 @@ class OpenRouterApi @Inject constructor(
                             ))
                             Log.d(TAG, "Invoked metadata callback: model=$lastResponseModel, usage=$lastUsage, cost=${lastUsage?.cost}")
                             
-                            // Emit any accumulated tool calls
+                            // Emit any accumulated tool calls at the end
                             if (accumulatedToolCalls.isNotEmpty()) {
+                                Log.d(TAG, "Final tool calls emission: ${accumulatedToolCalls.size} tool calls")
                                 onToolCalls?.invoke(accumulatedToolCalls)
                             }
                             break
@@ -195,8 +196,10 @@ class OpenRouterApi @Inject constructor(
                                         }
                                     }
                                     accumulatedToolCalls.addAll(toolCalls)
-                                    Log.d(TAG, "Detected tool calls in delta: ${toolCalls.size}")
+                                    Log.d(TAG, "Detected tool calls in delta: ${toolCalls.size}, total accumulated: ${accumulatedToolCalls.size}")
                                     emit(MessageChunk(toolCalls = toolCalls))
+                                    // Immediately invoke callback for streaming tool calls
+                                    onToolCalls?.invoke(toolCalls)
                                 }
                                 
                                 // Check for tool_calls in message (complete response)
@@ -213,8 +216,9 @@ class OpenRouterApi @Inject constructor(
                                         }
                                     }
                                     accumulatedToolCalls.addAll(toolCalls)
-                                    Log.d(TAG, "Detected tool calls in message: ${toolCalls.size}")
+                                    Log.d(TAG, "Detected tool calls in message: ${toolCalls.size}, total accumulated: ${accumulatedToolCalls.size}")
                                     emit(MessageChunk(toolCalls = toolCalls, finishReason = finishReason))
+                                    // Immediately invoke callback for complete message tool calls
                                     onToolCalls?.invoke(toolCalls)
                                 }
                                 

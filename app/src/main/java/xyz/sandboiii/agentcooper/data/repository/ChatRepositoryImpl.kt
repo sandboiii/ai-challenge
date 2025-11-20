@@ -29,6 +29,9 @@ import xyz.sandboiii.agentcooper.data.remote.dto.ToolCall
 import xyz.sandboiii.agentcooper.data.remote.api.ToolCallInfo
 import kotlinx.serialization.json.*
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 import javax.inject.Inject
 
@@ -268,11 +271,17 @@ class ChatRepositoryImpl @Inject constructor(
                 }
             }
             
-            // Execute tool calls if any
-            if (accumulatedToolCalls.isNotEmpty()) {
-                Log.d(TAG, "Executing ${accumulatedToolCalls.size} tool calls")
+            // Execute tool calls iteratively - AI can make multiple rounds of tool calls
+            var currentMessages = messages.toMutableList()
+            var roundNumber = 1
+            val maxRounds = 5 // Prevent infinite loops
+            
+            while (accumulatedToolCalls.isNotEmpty() && roundNumber <= maxRounds) {
+                Log.d(TAG, "Tool calling round $roundNumber: Executing ${accumulatedToolCalls.size} tool calls")
                 
                 // Execute each tool call via MCP
+                val currentRoundToolResults = mutableListOf<xyz.sandboiii.agentcooper.domain.model.ToolResult>()
+                
                 for (toolCall in accumulatedToolCalls) {
                     try {
                         Log.d(TAG, "Executing tool: ${toolCall.name} with args: ${toolCall.arguments}")
@@ -282,12 +291,14 @@ class ChatRepositoryImpl @Inject constructor(
                             json.parseToJsonElement(toolCall.arguments)
                         } catch (e: Exception) {
                             Log.e(TAG, "Failed to parse tool arguments", e)
-                            toolResults.add(xyz.sandboiii.agentcooper.domain.model.ToolResult(
+                            val errorResult = xyz.sandboiii.agentcooper.domain.model.ToolResult(
                                 toolCallId = toolCall.id,
                                 toolName = toolCall.name,
                                 result = "Error: Failed to parse arguments: ${e.message}",
                                 isError = true
-                            ))
+                            )
+                            currentRoundToolResults.add(errorResult)
+                            toolResults.add(errorResult)
                             continue
                         }
                         
@@ -297,42 +308,47 @@ class ChatRepositoryImpl @Inject constructor(
                         result.fold(
                             onSuccess = { resultText ->
                                 Log.d(TAG, "Tool ${toolCall.name} executed successfully")
-                                toolResults.add(xyz.sandboiii.agentcooper.domain.model.ToolResult(
+                                val successResult = xyz.sandboiii.agentcooper.domain.model.ToolResult(
                                     toolCallId = toolCall.id,
                                     toolName = toolCall.name,
                                     result = resultText,
                                     isError = false
-                                ))
+                                )
+                                currentRoundToolResults.add(successResult)
+                                toolResults.add(successResult)
                             },
                             onFailure = { error ->
                                 Log.e(TAG, "Tool ${toolCall.name} execution failed", error)
-                                toolResults.add(xyz.sandboiii.agentcooper.domain.model.ToolResult(
+                                val errorResult = xyz.sandboiii.agentcooper.domain.model.ToolResult(
                                     toolCallId = toolCall.id,
                                     toolName = toolCall.name,
                                     result = "Error: ${error.message}",
                                     isError = true
-                                ))
+                                )
+                                currentRoundToolResults.add(errorResult)
+                                toolResults.add(errorResult)
                             }
                         )
                     } catch (e: Exception) {
                         Log.e(TAG, "Exception executing tool ${toolCall.name}", e)
-                        toolResults.add(xyz.sandboiii.agentcooper.domain.model.ToolResult(
+                        val errorResult = xyz.sandboiii.agentcooper.domain.model.ToolResult(
                             toolCallId = toolCall.id,
                             toolName = toolCall.name,
                             result = "Error: ${e.message}",
                             isError = true
-                        ))
+                        )
+                        currentRoundToolResults.add(errorResult)
+                        toolResults.add(errorResult)
                     }
                 }
                 
-                // Send tool results back to OpenRouter and get final response
-                if (toolResults.isNotEmpty()) {
-                    Log.d(TAG, "Sending ${toolResults.size} tool results back to OpenRouter")
+                // Send tool results back to OpenRouter and get response (which may contain more tool calls)
+                if (currentRoundToolResults.isNotEmpty()) {
+                    Log.d(TAG, "Round $roundNumber: Sending ${currentRoundToolResults.size} tool results back to OpenRouter")
                     
-                    // Build messages with tool results
-                    // We need to add the assistant message with tool_calls and then tool result messages
-                    val messagesWithToolResults = messages.toMutableList().apply {
-                        // Add assistant message with tool calls
+                    // Build messages with tool results for this round
+                    val messagesWithToolResults = currentMessages.toMutableList().apply {
+                        // Add assistant message with tool calls from this round
                         val toolCallsForMessage = accumulatedToolCalls.map { toolCall ->
                             ToolCallInfo(
                                 id = toolCall.id,
@@ -347,8 +363,8 @@ class ChatRepositoryImpl @Inject constructor(
                             toolCalls = toolCallsForMessage
                         ))
                         
-                        // Add tool result messages
-                        toolResults.forEach { toolResult ->
+                        // Add tool result messages for this round
+                        currentRoundToolResults.forEach { toolResult ->
                             add(ChatMessageDto(
                                 role = "tool",
                                 content = toolResult.result,
@@ -358,8 +374,11 @@ class ChatRepositoryImpl @Inject constructor(
                         }
                     }
                     
-                    // Get final response from OpenRouter
-                    var finalContent = ""
+                    // Clear accumulated tool calls for next round
+                    accumulatedToolCalls.clear()
+                    var roundContent = ""
+                    
+                    // Get response from OpenRouter (may contain more tool calls)
                     chatApi.sendMessage(
                         messagesWithToolResults,
                         modelId,
@@ -372,16 +391,55 @@ class ChatRepositoryImpl @Inject constructor(
                             apiCost = (apiCost ?: 0.0) + (metadata.cost ?: 0.0)
                         },
                         tools = openAITools,
-                        onToolCalls = null // Don't handle nested tool calls for now
+                        onToolCalls = { newToolCalls ->
+                            Log.d(TAG, "Round $roundNumber: Received ${newToolCalls.size} new tool calls")
+                            val newDomainToolCalls = newToolCalls.map { toolCall ->
+                                xyz.sandboiii.agentcooper.domain.model.ToolCall(
+                                    id = toolCall.id,
+                                    name = toolCall.name,
+                                    arguments = toolCall.arguments
+                                )
+                            }
+                            accumulatedToolCalls.addAll(newDomainToolCalls)
+                        }
                     ).collect { chunk ->
+                        // Handle content chunks
                         chunk.content?.let { content ->
-                            finalContent += content
+                            roundContent += content
                             emit(content)
+                        }
+                        
+                        // Handle new tool calls in this round
+                        chunk.toolCalls?.let { newToolCalls ->
+                            val domainToolCalls = newToolCalls.map { toolCall ->
+                                xyz.sandboiii.agentcooper.domain.model.ToolCall(
+                                    id = toolCall.id,
+                                    name = toolCall.name,
+                                    arguments = toolCall.arguments
+                                )
+                            }
+                            accumulatedToolCalls.addAll(domainToolCalls)
+                            Log.d(TAG, "Round $roundNumber: Added ${domainToolCalls.size} tool calls from chunk")
                         }
                     }
                     
-                    accumulatedContent = finalContent
+                    accumulatedContent += roundContent
+                    currentMessages = messagesWithToolResults
+                    roundNumber++
+                    
+                    // If no new tool calls were received, break the loop
+                    if (accumulatedToolCalls.isEmpty()) {
+                        Log.d(TAG, "No more tool calls received, ending tool calling loop")
+                        break
+                    }
+                } else {
+                    break
                 }
+            }
+            
+            if (roundNumber > maxRounds) {
+                Log.w(TAG, "Tool calling stopped after $maxRounds rounds to prevent infinite loop")
+                emit("\n\n[Note: Tool calling stopped after $maxRounds rounds to prevent infinite loop]")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error streaming message", e)
@@ -739,6 +797,470 @@ class ChatRepositoryImpl @Inject constructor(
             title.take(maxLength - 3) + "..."
         } else {
             title
+        }
+    }
+    
+    override suspend fun sendMessageWithToolCallUpdates(
+        sessionId: String,
+        content: String,
+        modelId: String,
+        onToolCallsUpdate: (List<xyz.sandboiii.agentcooper.domain.model.ToolCall>) -> Unit,
+        onToolResultsUpdate: (List<xyz.sandboiii.agentcooper.domain.model.ToolResult>) -> Unit
+    ): Flow<String> = flow {
+        val storageLocation = preferencesManager.getStorageLocation()
+        
+        // Get conversation history before adding new message
+        val existingMessages = loadMessagesFromFile(sessionId)
+        
+        // Check if this is the first user message (to generate title)
+        val isFirstUserMessage = existingMessages.none { it.role == MessageRole.USER }
+        
+        // Get system prompt
+        val systemPrompt = preferencesManager.getSystemPrompt() ?: Constants.DEFAULT_SYSTEM_PROMPT
+        
+        // Build initial message context for token counting
+        val initialMessages = buildMessageContext(
+            messages = existingMessages,
+            systemPrompt = systemPrompt,
+            newUserMessageContent = content
+        )
+        
+        // Log token counting info
+        val userMessageCount = initialMessages.count { it.role == "user" }
+        val assistantMessageCount = initialMessages.count { it.role == "assistant" }
+        val summaryCount = initialMessages.count { it.role == "system" && it.content?.startsWith("Краткое содержание") == true }
+        Log.d(TAG, "Token counting: 1 system prompt, ${summaryCount} summary (if present), ${userMessageCount} user messages, ${assistantMessageCount} assistant messages")
+        
+        // Check token count and trigger summarization if needed
+        val tokenCount = TokenCounter.countTokens(initialMessages)
+        val threshold = preferencesManager.getTokenThreshold()
+        
+        // Get model context length as fallback threshold
+        val modelContextLength = try {
+            val models = chatApi.getModels()
+            models.find { it.id == modelId }?.contextLength
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to get model context length", e)
+            null
+        }
+        
+        val effectiveThreshold = threshold ?: modelContextLength
+        
+        Log.d(TAG, "Token count: $tokenCount, Threshold: $effectiveThreshold")
+        
+        // Get session for updating
+        val session = sessionRepository.getSessionById(sessionId)
+            ?: throw IllegalStateException("Session not found: $sessionId")
+        
+        // If threshold is set and token count exceeds it, perform summarization BEFORE saving user message
+        if (effectiveThreshold != null && tokenCount > effectiveThreshold) {
+            Log.d(TAG, "Token count ($tokenCount) exceeds threshold ($effectiveThreshold), triggering summarization")
+            _isSummarizing.value = true
+            try {
+                summarizeMessages(sessionId, modelId, existingMessages, storageLocation)
+            } finally {
+                val userMessage = ChatMessage(
+                    id = UUID.randomUUID().toString(),
+                    content = content,
+                    role = MessageRole.USER,
+                    timestamp = System.currentTimeMillis(),
+                    sessionId = sessionId
+                )
+                sessionFileStorage.addMessageToSession(session, userMessage, storageLocation)
+                _isSummarizing.value = false
+            }
+        } else {
+            // Save user message immediately if no summarization needed
+            val userMessage = ChatMessage(
+                id = UUID.randomUUID().toString(),
+                content = content,
+                role = MessageRole.USER,
+                timestamp = System.currentTimeMillis(),
+                sessionId = sessionId
+            )
+            sessionFileStorage.addMessageToSession(session, userMessage, storageLocation)
+        }
+        
+        // Reload messages after potential summarization and user message addition
+        val updatedMessages = loadMessagesFromFile(sessionId)
+        val messages = buildMessageContext(
+            messages = updatedMessages,
+            systemPrompt = systemPrompt
+        )
+        
+        // Initialize variables for streaming with tool call tracking
+        var accumulatedContent = ""
+        var accumulatedToolCalls = mutableListOf<xyz.sandboiii.agentcooper.domain.model.ToolCall>()
+        var toolResults = mutableListOf<xyz.sandboiii.agentcooper.domain.model.ToolResult>()
+
+        // Track response time and metadata
+        val startTime = System.currentTimeMillis()
+        var responseModelId: String? = null
+        var promptTokens: Int? = null
+        var completionTokens: Int? = null
+        var totalTokens: Int? = null
+        var apiCost: Double? = null
+
+        // Get available tools from MCP
+        val mcpTools = try {
+            mcpRepository.allTools.first()
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to get MCP tools", e)
+            emptyList()
+        }
+
+        val openAITools = if (mcpTools.isNotEmpty()) {
+            mcpTools.map { it.toOpenAITool() }
+        } else {
+            null
+        }
+
+        Log.d(TAG, "Available MCP tools: ${mcpTools.size}")
+
+        // Stream response from API with metadata callback and tool calling support
+        try {
+            var allToolCalls = mutableListOf<ToolCallInfo>()
+            
+            chatApi.sendMessage(
+                messages, 
+                modelId, 
+                stream = true,
+                onMetadata = { metadata ->
+                    Log.d(TAG, "Metadata callback invoked: model=${metadata.modelId}, prompt=${metadata.promptTokens}, completion=${metadata.completionTokens}, total=${metadata.totalTokens}, cost=${metadata.cost}")
+                    responseModelId = metadata.modelId ?: modelId
+                    promptTokens = metadata.promptTokens
+                    completionTokens = metadata.completionTokens
+                    totalTokens = metadata.totalTokens
+                    apiCost = metadata.cost
+                },
+                tools = openAITools,
+                onToolCalls = { toolCalls ->
+                    Log.d(TAG, "Received tool calls: ${toolCalls.size}")
+                    allToolCalls.addAll(toolCalls)
+                }
+            ).collect { chunk ->
+                // Handle content chunks
+                chunk.content?.let { content ->
+                    accumulatedContent += content
+                    emit(content)
+                }
+                
+                // Handle tool calls and notify ViewModel immediately
+                chunk.toolCalls?.let { toolCalls ->
+                    val domainToolCalls = toolCalls.map { toolCall ->
+                        xyz.sandboiii.agentcooper.domain.model.ToolCall(
+                            id = toolCall.id,
+                            name = toolCall.name,
+                            arguments = toolCall.arguments
+                        )
+                    }
+                    accumulatedToolCalls.addAll(domainToolCalls)
+                    Log.d(TAG, "Streaming: Accumulated ${accumulatedToolCalls.size} tool calls")
+                    // Notify ViewModel of new tool calls immediately
+                    onToolCallsUpdate(accumulatedToolCalls.toList())
+                }
+            }
+            
+            // Execute tool calls iteratively - AI can make multiple rounds of tool calls
+            var currentMessages = messages.toMutableList()
+            var roundNumber = 1
+            val maxRounds = 5
+            
+            while (accumulatedToolCalls.isNotEmpty() && roundNumber <= maxRounds) {
+                Log.d(TAG, "Tool calling round $roundNumber: Executing ${accumulatedToolCalls.size} tool calls")
+                
+                val currentRoundToolResults = mutableListOf<xyz.sandboiii.agentcooper.domain.model.ToolResult>()
+                
+                for (toolCall in accumulatedToolCalls) {
+                    try {
+                        Log.d(TAG, "Executing tool: ${toolCall.name} with args: ${toolCall.arguments}")
+                        
+                        val argumentsJson = try {
+                            json.parseToJsonElement(toolCall.arguments)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to parse tool arguments", e)
+                            val errorResult = xyz.sandboiii.agentcooper.domain.model.ToolResult(
+                                toolCallId = toolCall.id,
+                                toolName = toolCall.name,
+                                result = "Error: Failed to parse arguments: ${e.message}",
+                                isError = true
+                            )
+                            currentRoundToolResults.add(errorResult)
+                            toolResults.add(errorResult)
+                            continue
+                        }
+                        
+                        val result = mcpRepository.callTool(toolCall.name, argumentsJson)
+                        
+                        result.fold(
+                            onSuccess = { resultText ->
+                                Log.d(TAG, "Tool ${toolCall.name} executed successfully")
+                                val successResult = xyz.sandboiii.agentcooper.domain.model.ToolResult(
+                                    toolCallId = toolCall.id,
+                                    toolName = toolCall.name,
+                                    result = resultText,
+                                    isError = false
+                                )
+                                currentRoundToolResults.add(successResult)
+                                toolResults.add(successResult)
+                            },
+                            onFailure = { error ->
+                                Log.e(TAG, "Tool ${toolCall.name} execution failed", error)
+                                val errorResult = xyz.sandboiii.agentcooper.domain.model.ToolResult(
+                                    toolCallId = toolCall.id,
+                                    toolName = toolCall.name,
+                                    result = "Error: ${error.message}",
+                                    isError = true
+                                )
+                                currentRoundToolResults.add(errorResult)
+                                toolResults.add(errorResult)
+                            }
+                        )
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Exception executing tool ${toolCall.name}", e)
+                        val errorResult = xyz.sandboiii.agentcooper.domain.model.ToolResult(
+                            toolCallId = toolCall.id,
+                            toolName = toolCall.name,
+                            result = "Error: ${e.message}",
+                            isError = true
+                        )
+                        currentRoundToolResults.add(errorResult)
+                        toolResults.add(errorResult)
+                    }
+                }
+                
+                // Notify ViewModel of tool results immediately
+                onToolResultsUpdate(toolResults.toList())
+                
+                // Send tool results back to OpenRouter and get response
+                if (currentRoundToolResults.isNotEmpty()) {
+                    Log.d(TAG, "Round $roundNumber: Sending ${currentRoundToolResults.size} tool results back to OpenRouter")
+                    
+                    val messagesWithToolResults = currentMessages.toMutableList().apply {
+                        val toolCallsForMessage = accumulatedToolCalls.map { toolCall ->
+                            ToolCallInfo(
+                                id = toolCall.id,
+                                name = toolCall.name,
+                                arguments = toolCall.arguments
+                            )
+                        }
+                        add(ChatMessageDto(
+                            role = "assistant",
+                            content = "",
+                            toolCallId = null,
+                            toolCalls = toolCallsForMessage
+                        ))
+                        
+                        currentRoundToolResults.forEach { toolResult ->
+                            add(ChatMessageDto(
+                                role = "tool",
+                                content = toolResult.result,
+                                toolCallId = toolResult.toolCallId,
+                                toolCalls = null
+                            ))
+                        }
+                    }
+                    
+                    accumulatedToolCalls.clear()
+                    var roundContent = ""
+                    
+                    chatApi.sendMessage(
+                        messagesWithToolResults,
+                        modelId,
+                        stream = true,
+                        onMetadata = { metadata ->
+                            responseModelId = metadata.modelId ?: modelId
+                            promptTokens = (promptTokens ?: 0) + (metadata.promptTokens ?: 0)
+                            completionTokens = (completionTokens ?: 0) + (metadata.completionTokens ?: 0)
+                            totalTokens = (totalTokens ?: 0) + (metadata.totalTokens ?: 0)
+                            apiCost = (apiCost ?: 0.0) + (metadata.cost ?: 0.0)
+                        },
+                        tools = openAITools,
+                        onToolCalls = { newToolCalls ->
+                            Log.d(TAG, "Round $roundNumber: Received ${newToolCalls.size} new tool calls")
+                            val newDomainToolCalls = newToolCalls.map { toolCall ->
+                                xyz.sandboiii.agentcooper.domain.model.ToolCall(
+                                    id = toolCall.id,
+                                    name = toolCall.name,
+                                    arguments = toolCall.arguments
+                                )
+                            }
+                            accumulatedToolCalls.addAll(newDomainToolCalls)
+                        }
+                    ).collect { chunk ->
+                        chunk.content?.let { content ->
+                            roundContent += content
+                            emit(content)
+                        }
+                        
+                        chunk.toolCalls?.let { newToolCalls ->
+                            val domainToolCalls = newToolCalls.map { toolCall ->
+                                xyz.sandboiii.agentcooper.domain.model.ToolCall(
+                                    id = toolCall.id,
+                                    name = toolCall.name,
+                                    arguments = toolCall.arguments
+                                )
+                            }
+                            accumulatedToolCalls.addAll(domainToolCalls)
+                            Log.d(TAG, "Round $roundNumber: Added ${domainToolCalls.size} tool calls from chunk")
+                            // Notify ViewModel of new tool calls immediately
+                            onToolCallsUpdate(accumulatedToolCalls.toList())
+                        }
+                    }
+                    
+                    accumulatedContent += roundContent
+                    currentMessages = messagesWithToolResults
+                    roundNumber++
+                    
+                    if (accumulatedToolCalls.isEmpty()) {
+                        Log.d(TAG, "No more tool calls received, ending tool calling loop")
+                        break
+                    }
+                } else {
+                    break
+                }
+            }
+            
+            if (roundNumber > maxRounds) {
+                Log.w(TAG, "Tool calling stopped after $maxRounds rounds to prevent infinite loop")
+                emit("\n\n[Note: Tool calling stopped after $maxRounds rounds to prevent infinite loop]")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error streaming message", e)
+            throw e
+        }
+        
+        val responseTimeMs = System.currentTimeMillis() - startTime
+        val messageContent = accumulatedContent
+        
+        Log.d(TAG, "Before cost calculation - Final token values: prompt=$promptTokens, completion=$completionTokens, total=$totalTokens, modelId=${responseModelId ?: modelId}, apiCost=$apiCost")
+        
+        // Calculate cost and context window usage
+        var totalCost: Double? = null
+        var contextWindowUsedPercent: Double? = null
+        
+        // Use API cost if available, otherwise fallback to local calculation
+        if (apiCost != null) {
+            totalCost = apiCost
+            Log.d(TAG, "Using cost from API usage accounting: $totalCost")
+        } else {
+            Log.d(TAG, "API cost not available, falling back to local calculation")
+            try {
+                val models = chatApi.getModels()
+                val lookupModelId = responseModelId ?: modelId
+                val model = models.find { it.id == lookupModelId }
+                
+                Log.d(TAG, "Looking up model for cost calculation: $lookupModelId")
+                Log.d(TAG, "Token usage: prompt=$promptTokens, completion=$completionTokens, total=$totalTokens")
+                
+                if (model == null) {
+                    Log.w(TAG, "Model not found in models list: $lookupModelId")
+                }
+                
+                model?.let { modelInfo ->
+                    Log.d(TAG, "Found model: ${modelInfo.name}, pricing: ${modelInfo.pricing?.displayText ?: "null"}")
+                    
+                    // Calculate cost if model is paid
+                    modelInfo.pricing?.let { pricing ->
+                        Log.d(TAG, "Pricing details: prompt=${pricing.prompt}, completion=${pricing.completion}, isFree=${pricing.isFree}")
+                        
+                        val promptPricePerToken = pricing.prompt?.toDoubleOrNull() ?: 0.0
+                        val completionPricePerToken = pricing.completion?.toDoubleOrNull() ?: 0.0
+                        
+                        val isActuallyPaid = promptPricePerToken > 0.0 || completionPricePerToken > 0.0
+                        
+                        if (isActuallyPaid && promptTokens != null && completionTokens != null) {
+                            val promptCost = promptTokens!! * promptPricePerToken
+                            val completionCost = completionTokens!! * completionPricePerToken
+                            totalCost = promptCost + completionCost
+                            
+                            Log.d(TAG, "Cost calculation: promptCost=$promptCost, completionCost=$completionCost, totalCost=$totalCost")
+                        } else {
+                            Log.d(TAG, "Model appears to be free or missing token counts")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to calculate cost", e)
+            }
+        }
+        
+        // Calculate context window usage percentage
+        try {
+            val models = chatApi.getModels()
+            val lookupModelId = responseModelId ?: modelId
+            val model = models.find { it.id == lookupModelId }
+            
+            model?.contextLength?.let { contextLength ->
+                totalTokens?.let { tokens ->
+                    contextWindowUsedPercent = (tokens.toDouble() / contextLength.toDouble()) * 100.0
+                    Log.d(TAG, "Context window usage: $tokens / $contextLength = ${contextWindowUsedPercent}%")
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to calculate context window usage", e)
+        }
+        
+        Log.d(TAG, "Cost calculation complete - totalCost=$totalCost, contextWindowUsedPercent=$contextWindowUsedPercent")
+        
+        // Save assistant message with all accumulated data
+        val assistantMessage = ChatMessage(
+            id = UUID.randomUUID().toString(),
+            content = messageContent,
+            role = MessageRole.ASSISTANT,
+            timestamp = System.currentTimeMillis(),
+            sessionId = sessionId,
+            modelId = responseModelId ?: modelId,
+            responseTimeMs = responseTimeMs,
+            promptTokens = promptTokens,
+            completionTokens = completionTokens,
+            totalCost = totalCost,
+            contextWindowUsedPercent = contextWindowUsedPercent,
+            toolCalls = if (accumulatedToolCalls.isNotEmpty()) accumulatedToolCalls else null,
+            toolResults = if (toolResults.isNotEmpty()) toolResults else null
+        )
+        
+        sessionFileStorage.addMessageToSession(session, assistantMessage, storageLocation)
+        
+        // Generate title if this is the first user message
+        if (isFirstUserMessage) {
+            try {
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        val titlePrompt = "Generate a short, descriptive title (max 50 characters) for a conversation that starts with: \"$content\". Respond with only the title, no quotes or extra text."
+                        
+                        val titleMessages = listOf(
+                            ChatMessageDto(role = "system", content = "You are a helpful assistant that generates concise titles for conversations."),
+                            ChatMessageDto(role = "user", content = titlePrompt)
+                        )
+                        
+                        var generatedTitle = ""
+                        chatApi.sendMessage(
+                            messages = titleMessages,
+                            model = modelId,
+                            stream = false,
+                            onMetadata = null,
+                            tools = null,
+                            onToolCalls = null
+                        ).collect { chunk ->
+                            chunk.content?.let { generatedTitle += it }
+                        }
+                        
+                        if (generatedTitle.isNotBlank()) {
+                            val cleanTitle = generatedTitle.trim()
+                                .removePrefix("\"").removeSuffix("\"")
+                                .take(50)
+                            
+                            sessionRepository.updateSessionTitle(sessionId, cleanTitle)
+                            Log.d(TAG, "Generated session title: $cleanTitle")
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to generate session title", e)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to generate session title", e)
+            }
         }
     }
 }

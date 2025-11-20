@@ -12,6 +12,14 @@ interface ChatRepository {
         content: String,
         modelId: String
     ): Flow<String>
+    
+    suspend fun sendMessageWithToolCallUpdates(
+        sessionId: String,
+        content: String,
+        modelId: String,
+        onToolCallsUpdate: (List<xyz.sandboiii.agentcooper.domain.model.ToolCall>) -> Unit = {},
+        onToolResultsUpdate: (List<xyz.sandboiii.agentcooper.domain.model.ToolResult>) -> Unit = {}
+    ): Flow<String>
     suspend fun deleteMessages(sessionId: String)
     suspend fun deleteAllMessages()
 }

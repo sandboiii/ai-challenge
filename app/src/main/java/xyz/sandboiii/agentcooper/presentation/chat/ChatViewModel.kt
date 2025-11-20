@@ -151,6 +151,8 @@ class ChatViewModel @Inject constructor(
                     lastError = if (currentState is ChatState.Success) currentState.lastError else null,
                     isStreaming = false,
                     streamingContent = "",
+                    streamingToolCalls = emptyList(),
+                    streamingToolResults = emptyList(),
                     isWaitingForResponse = preserveWaiting
                 )
             }
@@ -195,6 +197,8 @@ class ChatViewModel @Inject constructor(
                     messages = messagesWithUser,
                     isStreaming = true,
                     streamingContent = "",
+                    streamingToolCalls = emptyList(),
+                    streamingToolResults = emptyList(),
                     lastError = null, // Clear any previous error
                     isWaitingForResponse = true // Show loading animation while waiting for first chunk
                 )
@@ -205,6 +209,8 @@ class ChatViewModel @Inject constructor(
                 var errorMessage: String? = null
                 var hasReceivedFirstChunk = false
                 var previousSummarizingState = chatRepository.isSummarizing.value
+                var streamingToolCalls = mutableListOf<xyz.sandboiii.agentcooper.domain.model.ToolCall>()
+                var streamingToolResults = mutableListOf<xyz.sandboiii.agentcooper.domain.model.ToolResult>()
                 
                 // Observe summarization state changes to reload messages when summarization completes
                 viewModelScope.launch {
@@ -234,10 +240,36 @@ class ChatViewModel @Inject constructor(
                     }
                 }
                 
-                sendMessageUseCase(
+                sendMessageUseCase.invokeWithToolCallUpdates(
                     sessionId, 
                     content, 
-                    modelId
+                    modelId,
+                    onToolCallsUpdate = { toolCalls ->
+                        Log.d(TAG, "Received streaming tool calls update: ${toolCalls.size}")
+                        streamingToolCalls.clear()
+                        streamingToolCalls.addAll(toolCalls)
+                        
+                        // Update state with new tool calls
+                        val currentState = _state.value
+                        if (currentState is ChatState.Success) {
+                            _state.value = currentState.copy(
+                                streamingToolCalls = streamingToolCalls.toList()
+                            )
+                        }
+                    },
+                    onToolResultsUpdate = { toolResults ->
+                        Log.d(TAG, "Received streaming tool results update: ${toolResults.size}")
+                        streamingToolResults.clear()
+                        streamingToolResults.addAll(toolResults)
+                        
+                        // Update state with new tool results
+                        val currentState = _state.value
+                        if (currentState is ChatState.Success) {
+                            _state.value = currentState.copy(
+                                streamingToolResults = streamingToolResults.toList()
+                            )
+                        }
+                    }
                 )
                     .catch { e ->
                         hasError = true
@@ -250,6 +282,8 @@ class ChatViewModel @Inject constructor(
                             messages = messagesWithUser,
                             isStreaming = false,
                             streamingContent = "",
+                            streamingToolCalls = emptyList(),
+                            streamingToolResults = emptyList(),
                             lastError = errorMessage,
                             isWaitingForResponse = false
                         )
@@ -274,7 +308,9 @@ class ChatViewModel @Inject constructor(
                             content = accumulatedContent,
                             role = MessageRole.ASSISTANT,
                             timestamp = System.currentTimeMillis(),
-                            sessionId = sessionId
+                            sessionId = sessionId,
+                            toolCalls = if (streamingToolCalls.isNotEmpty()) streamingToolCalls.toList() else null,
+                            toolResults = if (streamingToolResults.isNotEmpty()) streamingToolResults.toList() else null
                         )
                         
                         val updatedMessages = messagesWithUser + streamingMessage
@@ -285,6 +321,8 @@ class ChatViewModel @Inject constructor(
                             messages = updatedMessages,
                             isStreaming = true,
                             streamingContent = accumulatedContent,
+                            streamingToolCalls = streamingToolCalls.toList(),
+                            streamingToolResults = streamingToolResults.toList(),
                             lastError = null, // Clear error when receiving chunks
                             isWaitingForResponse = false // Hide thinking animation once streaming starts
                         )
@@ -300,7 +338,9 @@ class ChatViewModel @Inject constructor(
                         _state.value = finalState.copy(
                             isWaitingForResponse = false,
                             isStreaming = false,
-                            streamingContent = ""
+                            streamingContent = "",
+                            streamingToolCalls = emptyList(),
+                            streamingToolResults = emptyList()
                         )
                         Log.d(TAG, "Cleared isWaitingForResponse and isStreaming after streaming complete")
                     }
@@ -325,6 +365,8 @@ class ChatViewModel @Inject constructor(
                     messages = currentMessages,
                     isStreaming = false,
                     streamingContent = "",
+                    streamingToolCalls = emptyList(),
+                    streamingToolResults = emptyList(),
                     lastError = e.message ?: "Failed to send message",
                     isWaitingForResponse = false
                 )

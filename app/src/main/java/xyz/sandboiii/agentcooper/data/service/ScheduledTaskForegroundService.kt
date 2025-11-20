@@ -269,43 +269,60 @@ class ScheduledTaskForegroundService : Service() {
                 }
             }
 
-            // Execute tool calls if any
-            if (accumulatedToolCalls.isNotEmpty()) {
-                Log.d(TAG, "Service executing ${accumulatedToolCalls.size} tool calls")
+            // Execute tool calls iteratively - AI can make multiple rounds of tool calls
+            var currentMessages = messages.toMutableList()
+            var roundNumber = 1
+            val maxRounds = 5 // Prevent infinite loops
+            
+            while (accumulatedToolCalls.isNotEmpty() && roundNumber <= maxRounds) {
+                Log.d(TAG, "Service tool calling round $roundNumber: Executing ${accumulatedToolCalls.size} tool calls")
+                
+                // Execute each tool call via MCP
+                val currentRoundToolResults = mutableListOf<ToolResult>()
+                
                 for (toolCall in accumulatedToolCalls) {
                     try {
                         val argumentsJson: JsonElement? = try {
                             json.parseToJsonElement(toolCall.arguments)
                         } catch (e: Exception) {
                             Log.e(TAG, "Service: Failed to parse tool arguments for ${toolCall.name}", e)
-                            null
+                            val errorResult = ToolResult(toolCall.id, toolCall.name, "Error: Failed to parse arguments: ${e.message}", true)
+                            currentRoundToolResults.add(errorResult)
+                            toolResults.add(errorResult)
+                            continue
                         }
 
                         val result = mcpRepository.callTool(toolCall.name, argumentsJson)
                         result.fold(
                             onSuccess = { resultText ->
-                                toolResults.add(ToolResult(toolCall.id, toolCall.name, resultText, false))
+                                val successResult = ToolResult(toolCall.id, toolCall.name, resultText, false)
+                                currentRoundToolResults.add(successResult)
+                                toolResults.add(successResult)
                             },
                             onFailure = { error ->
-                                toolResults.add(ToolResult(toolCall.id, toolCall.name, "Error: ${error.message}", true))
+                                val errorResult = ToolResult(toolCall.id, toolCall.name, "Error: ${error.message}", true)
+                                currentRoundToolResults.add(errorResult)
+                                toolResults.add(errorResult)
                             }
                         )
                     } catch (e: Exception) {
                         Log.e(TAG, "Service: Exception during tool execution for ${toolCall.name}", e)
-                        toolResults.add(ToolResult(toolCall.id, toolCall.name, "Error: ${e.message}", true))
+                        val errorResult = ToolResult(toolCall.id, toolCall.name, "Error: ${e.message}", true)
+                        currentRoundToolResults.add(errorResult)
+                        toolResults.add(errorResult)
                     }
                 }
 
-                // Send tool results back to the AI model for a final response
-                if (toolResults.isNotEmpty()) {
-                    Log.d(TAG, "Service sending ${toolResults.size} tool results back to AI model")
-                    val messagesWithToolResults = messages.toMutableList().apply {
+                // Send tool results back to AI model and get response (which may contain more tool calls)
+                if (currentRoundToolResults.isNotEmpty()) {
+                    Log.d(TAG, "Service round $roundNumber: Sending ${currentRoundToolResults.size} tool results back to AI model")
+                    val messagesWithToolResults = currentMessages.toMutableList().apply {
                         add(ChatMessageDto(
                             role = "assistant",
                             content = "",
                             toolCalls = accumulatedToolCalls.map { ToolCallInfo(it.id, it.name, it.arguments) }
                         ))
-                        toolResults.forEach { toolResult ->
+                        currentRoundToolResults.forEach { toolResult ->
                             add(ChatMessageDto(
                                 role = "tool",
                                 content = toolResult.result,
@@ -314,21 +331,58 @@ class ScheduledTaskForegroundService : Service() {
                         }
                     }
 
-                    var finalContent = ""
+                    // Clear accumulated tool calls for next round
+                    accumulatedToolCalls.clear()
+                    var roundContent = ""
+                    
                     chatApi.sendMessage(
                         messages = messagesWithToolResults,
                         model = task.modelId,
                         stream = true,
                         onMetadata = null,
                         tools = mcpTools,
-                        onToolCalls = null
+                        onToolCalls = { newToolCalls ->
+                            Log.d(TAG, "Service round $roundNumber: Received ${newToolCalls.size} new tool calls")
+                            accumulatedToolCalls.addAll(newToolCalls.map {
+                                xyz.sandboiii.agentcooper.domain.model.ToolCall(it.id, it.name, it.arguments)
+                            })
+                        }
                     ).collect { chunk ->
                         chunk.content?.let { content ->
-                            finalContent += content
+                            roundContent += content
+                        }
+                        
+                        // Handle new tool calls in this round
+                        chunk.toolCalls?.let { newToolCalls ->
+                            val domainToolCalls = newToolCalls.map { toolCall ->
+                                xyz.sandboiii.agentcooper.domain.model.ToolCall(
+                                    id = toolCall.id,
+                                    name = toolCall.name,
+                                    arguments = toolCall.arguments
+                                )
+                            }
+                            accumulatedToolCalls.addAll(domainToolCalls)
+                            Log.d(TAG, "Service round $roundNumber: Added ${domainToolCalls.size} tool calls from chunk")
                         }
                     }
-                    accumulatedContent = finalContent
+                    
+                    accumulatedContent += roundContent
+                    currentMessages = messagesWithToolResults
+                    roundNumber++
+                    
+                    // If no new tool calls were received, break the loop
+                    if (accumulatedToolCalls.isEmpty()) {
+                        Log.d(TAG, "Service: No more tool calls received, ending tool calling loop")
+                        break
+                    }
+                } else {
+                    break
                 }
+            }
+            
+            if (roundNumber > maxRounds) {
+                Log.w(TAG, "Service: Tool calling stopped after $maxRounds rounds to prevent infinite loop")
+                accumulatedContent += "\n\n[Note: Tool calling stopped after $maxRounds rounds to prevent infinite loop]"
             }
 
             // Create a new session for this task execution
