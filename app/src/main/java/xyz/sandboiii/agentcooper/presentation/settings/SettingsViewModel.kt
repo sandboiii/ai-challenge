@@ -62,12 +62,24 @@ class SettingsViewModel @Inject constructor(
     private val _migrationSuccess = MutableStateFlow(false)
     val migrationSuccess: StateFlow<Boolean> = _migrationSuccess.asStateFlow()
     
+    val temperature = preferencesManager.temperature
+    
     init {
         loadApiKey()
         loadSystemPrompt()
         loadWelcomeMessageEnabled()
         loadTokenThreshold()
         loadStorageLocation()
+    }
+    
+    fun updateTemperature(newTemp: Float) {
+        viewModelScope.launch {
+            try {
+                preferencesManager.setTemperature(newTemp)
+            } catch (e: Exception) {
+                _errorMessage.value = "Ошибка сохранения температуры: ${e.message}"
+            }
+        }
     }
     
     private fun loadApiKey() {

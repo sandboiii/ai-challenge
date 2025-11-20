@@ -68,7 +68,6 @@ fun ChatScreen(
     sessionId: String,
     modelId: String,
     onNavigateBack: () -> Unit = {},
-    onNavigateToMcpManager: () -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     LaunchedEffect(sessionId, modelId) {
@@ -166,14 +165,6 @@ fun ChatScreen(
                         Icon(
                             imageVector = Icons.Default.ArrowBack,
                             contentDescription = "Назад"
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(onClick = onNavigateToMcpManager) {
-                        Icon(
-                            imageVector = Icons.Default.Build,
-                            contentDescription = "MCP Servers"
                         )
                     }
                 }
@@ -356,7 +347,7 @@ fun MessageBubble(
                         .widthIn(max = 280.dp)
                         .clip(RoundedCornerShape(16.dp)),
                     color = when {
-                        isUser -> Color(0xFF6200EE) // Material Design Purple 700
+                        isUser -> MaterialTheme.colorScheme.primary
                         isSummary -> MaterialTheme.colorScheme.primaryContainer
                         else -> MaterialTheme.colorScheme.surfaceVariant
                     },
@@ -378,7 +369,7 @@ fun MessageBubble(
                                     modifier = Modifier.fillMaxWidth(),
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = MaterialTheme.colorScheme.primary,
-                                        contentColor = Color.White
+                                        contentColor = MaterialTheme.colorScheme.onPrimary
                                     )
                                 ) {
                                     Text(
@@ -413,7 +404,7 @@ fun MessageBubble(
                                     text = "🔧 Tool Calls:",
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 message.toolCalls.forEach { toolCall ->
@@ -458,7 +449,7 @@ fun MessageBubble(
                                     color = if (message.toolResults.any { it.isError }) {
                                         MaterialTheme.colorScheme.error
                                     } else {
-                                        MaterialTheme.colorScheme.primary
+                                        MaterialTheme.colorScheme.onSurface
                                     }
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
@@ -518,7 +509,7 @@ fun MessageBubble(
                                         key = message.id,
                                         fullText = message.content,
                                         textColor = if (isUser) {
-                                            Color.White
+                                            MaterialTheme.colorScheme.onPrimary
                                         } else {
                                             MaterialTheme.colorScheme.onSurface
                                         },
@@ -528,7 +519,7 @@ fun MessageBubble(
                                     Spacer(modifier = Modifier.width(2.dp))
                                     TypingCursor(
                                         color = if (isUser) {
-                                            Color.White
+                                            MaterialTheme.colorScheme.onPrimary
                                         } else {
                                             MaterialTheme.colorScheme.onSurface
                                         }
@@ -539,8 +530,7 @@ fun MessageBubble(
                                         text = parseMarkdown(message.content),
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = if (isUser) {
-                                            // Always use white on user message bubbles for maximum contrast
-                                            Color.White
+                                            MaterialTheme.colorScheme.onPrimary
                                         } else {
                                             // Use onSurface for better contrast on surfaceVariant
                                             MaterialTheme.colorScheme.onSurface
@@ -738,42 +728,21 @@ fun MessageInput(
     
     // Use Material Design colors for borders, but ensure visibility
     val unfocusedBorderColor = MaterialTheme.colorScheme.outline
-    // Use a darker, more visible color for focused state
-    val focusedBorderColor = if (isDarkTheme) {
-        Color(0xFF90CAF9) // Light blue for dark theme
-    } else {
-        Color(0xFF1976D2) // Material Blue 700 - clearly visible on light background
-    }
+    // Use primary color for focused state
+    val focusedBorderColor = MaterialTheme.colorScheme.primary
     
-    // Cursor color - use a dark, contrasting color that stands out
-    val cursorColor = if (isDarkTheme) {
-        Color(0xFF90CAF9) // Light blue for dark theme
-    } else {
-        Color(0xFF1976D2) // Material Blue 700 - clearly visible and distinct from placeholder
-    }
+    // Cursor color - use primary color
+    val cursorColor = MaterialTheme.colorScheme.primary
     
-    // Background color for text input to ensure text selection handles are visible
-    // Use a darker background so that light selection handles (which use primary color) are visible
-    // The theme's primary color is light (0xFFF5F5F5), so we need a darker background
-    val inputBackgroundColor = if (isDarkTheme) {
-        Color(0xFF2D2D2D) // Darker background for dark theme - contrasts with light selection handles
-    } else {
-        Color(0xFFE0E0E0) // Darker gray background for light theme - contrasts with light selection handles
-    }
+    // Background color for text input
+    val inputBackgroundColor = MaterialTheme.colorScheme.surfaceVariant
     
-    // Text selection colors - ensure contrast with background
-    val textSelectionColors = remember {
+    // Text selection colors - use primary color
+    val colorScheme = MaterialTheme.colorScheme
+    val textSelectionColors = remember(colorScheme) {
         TextSelectionColors(
-            handleColor = if (isDarkTheme) {
-                Color(0xFF90CAF9) // Light blue handles for dark theme - visible on dark background
-            } else {
-                Color(0xFF1976D2) // Dark blue handles for light theme - visible on light background
-            },
-            backgroundColor = if (isDarkTheme) {
-                Color(0xFF1976D2).copy(alpha = 0.4f) // Blue selection background for dark theme
-            } else {
-                Color(0xFF1976D2).copy(alpha = 0.3f) // Blue selection background for light theme
-            }
+            handleColor = colorScheme.primary,
+            backgroundColor = colorScheme.primary.copy(alpha = 0.3f)
         )
     }
     

@@ -252,8 +252,8 @@ fun McpServerCard(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     val (statusColor, statusText) = when (server.state) {
-                        McpConnectionState.CONNECTED -> Color(0xFF4CAF50) to "Connected"
-                        McpConnectionState.CONNECTING -> Color(0xFFFF9800) to "Connecting"
+                        McpConnectionState.CONNECTED -> MaterialTheme.colorScheme.tertiary to "Connected"
+                        McpConnectionState.CONNECTING -> MaterialTheme.colorScheme.secondary to "Connecting"
                         McpConnectionState.ERROR -> MaterialTheme.colorScheme.error to "Error"
                         McpConnectionState.DISCONNECTED -> MaterialTheme.colorScheme.onSurfaceVariant to "Disconnected"
                     }

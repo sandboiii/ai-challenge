@@ -30,6 +30,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import android.net.Uri
+import xyz.sandboiii.agentcooper.util.Constants
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
@@ -52,6 +53,7 @@ fun SettingsScreen(
     val storageLocation by viewModel.storageLocation.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = null)
     val isMigrating by viewModel.isMigrating.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
     val migrationSuccess by viewModel.migrationSuccess.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
+    val temperature by viewModel.temperature.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = Constants.DEFAULT_TEMPERATURE)
     
     var showDeleteConfirmation by remember { mutableStateOf(false) }
     
@@ -84,19 +86,12 @@ fun SettingsScreen(
             MaterialTheme.colorScheme.onSurface.green > 0.9f &&
             MaterialTheme.colorScheme.onSurface.blue > 0.9f
     
-    // Text selection colors - ensure contrast with surface
-    val textSelectionColors = remember(isDarkTheme) {
+    // Text selection colors - use primary color
+    val colorScheme = MaterialTheme.colorScheme
+    val textSelectionColors = remember(colorScheme) {
         TextSelectionColors(
-            handleColor = if (isDarkTheme) {
-                Color(0xFF90CAF9) // Light blue handles for dark theme - visible on dark background
-            } else {
-                Color(0xFF1976D2) // Dark blue handles for light theme - visible on light background
-            },
-            backgroundColor = if (isDarkTheme) {
-                Color(0xFF1976D2).copy(alpha = 0.4f) // Blue selection background for dark theme
-            } else {
-                Color(0xFF1976D2).copy(alpha = 0.3f) // Blue selection background for light theme
-            }
+            handleColor = colorScheme.primary,
+            backgroundColor = colorScheme.primary.copy(alpha = 0.3f)
         )
     }
     
@@ -234,16 +229,6 @@ fun SettingsScreen(
                                 }
                             ),
                             isError = errorMessage != null,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                                focusedBorderColor = MaterialTheme.colorScheme.onSurface,
-                                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                                focusedLabelColor = MaterialTheme.colorScheme.onSurface,
-                                unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                focusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                unfocusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
                         )
                     }
                     
@@ -259,7 +244,7 @@ fun SettingsScreen(
                         Text(
                             text = "API ключ успешно сохранён",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                     }
                     
@@ -272,22 +257,16 @@ fun SettingsScreen(
                         },
                         modifier = Modifier.fillMaxWidth(),
                         enabled = !isLoading && localApiKey.isNotBlank(),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF6200EE), // Use a darker purple for better contrast
-                            contentColor = Color.White, // Use white text for maximum contrast
-                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     ) {
                         if (isLoading) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(20.dp),
-                                color = Color.White
+                                color = MaterialTheme.colorScheme.onPrimary
                             )
                         } else {
                             Text(
                                 "Сохранить",
-                                color = Color.White
+                                color = MaterialTheme.colorScheme.onPrimary
                             )
                         }
                     }
@@ -338,16 +317,6 @@ fun SettingsScreen(
                                 }
                             ),
                             isError = errorMessage != null,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                                focusedBorderColor = MaterialTheme.colorScheme.onSurface,
-                                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                                focusedLabelColor = MaterialTheme.colorScheme.onSurface,
-                                unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                focusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                unfocusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
                         )
                     }
                     
@@ -355,7 +324,7 @@ fun SettingsScreen(
                         Text(
                             text = "Системный промпт успешно сохранён",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                     }
                     
@@ -368,22 +337,16 @@ fun SettingsScreen(
                         },
                         modifier = Modifier.fillMaxWidth(),
                         enabled = !isLoading && localSystemPrompt.isNotBlank(),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF6200EE),
-                            contentColor = Color.White,
-                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     ) {
                         if (isLoading) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(20.dp),
-                                color = Color.White
+                                color = MaterialTheme.colorScheme.onPrimary
                             )
                         } else {
                             Text(
                                 "Сохранить промпт",
-                                color = Color.White
+                                color = MaterialTheme.colorScheme.onPrimary
                             )
                         }
                     }
@@ -424,13 +387,65 @@ fun SettingsScreen(
                             checked = welcomeMessageEnabled,
                             onCheckedChange = { viewModel.updateWelcomeMessageEnabled(it) },
                             colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = Color(0xFF6200EE),
-                                uncheckedThumbColor = Color(0xFF757575),
-                                uncheckedTrackColor = Color(0xFFE0E0E0)
+                                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                uncheckedThumbColor = MaterialTheme.colorScheme.outline,
+                                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
                             )
                         )
                     }
+                }
+            }
+            
+            // Temperature Section
+            Card(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Температура AI",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = String.format("%.1f", temperature),
+                                style = MaterialTheme.typography.headlineSmall,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        Text(
+                            text = "${Constants.MIN_TEMPERATURE.toInt()}-${Constants.MAX_TEMPERATURE.toInt()}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    Slider(
+                        value = temperature,
+                        onValueChange = { viewModel.updateTemperature(it) },
+                        valueRange = Constants.MIN_TEMPERATURE..Constants.MAX_TEMPERATURE,
+                        steps = 19, // 0.0 to 2.0 with 0.1 increments = 20 steps - 1
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = SliderDefaults.colors(
+                            thumbColor = MaterialTheme.colorScheme.onSurface,
+                            activeTrackColor = MaterialTheme.colorScheme.onSurface,
+                            inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    )
                 }
             }
             
@@ -474,16 +489,6 @@ fun SettingsScreen(
                                 }
                             ),
                             isError = errorMessage != null,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                                focusedBorderColor = MaterialTheme.colorScheme.onSurface,
-                                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                                focusedLabelColor = MaterialTheme.colorScheme.onSurface,
-                                unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                focusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                unfocusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
                         )
                     }
                     
@@ -491,7 +496,7 @@ fun SettingsScreen(
                         Text(
                             text = "Порог токенов успешно сохранён",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                     }
                     
@@ -503,22 +508,16 @@ fun SettingsScreen(
                         },
                         modifier = Modifier.fillMaxWidth(),
                         enabled = !isLoading && localTokenThreshold.isNotBlank(),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF6200EE),
-                            contentColor = Color.White,
-                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     ) {
                         if (isLoading) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(20.dp),
-                                color = Color.White
+                                color = MaterialTheme.colorScheme.onPrimary
                             )
                         } else {
                             Text(
                                 "Сохранить порог",
-                                color = Color.White
+                                color = MaterialTheme.colorScheme.onPrimary
                             )
                         }
                     }
@@ -578,8 +577,8 @@ fun SettingsScreen(
                             modifier = Modifier.weight(1f),
                             enabled = !isMigrating && !isLoading,
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF6200EE),
-                                contentColor = Color.White,
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary,
                                 disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                                 disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -587,12 +586,12 @@ fun SettingsScreen(
                             if (isMigrating) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(20.dp),
-                                    color = Color.White
+                                    color = MaterialTheme.colorScheme.onPrimary
                                 )
                             } else {
                                 Text(
                                     "Выбрать папку",
-                                    color = Color.White
+                                    color = MaterialTheme.colorScheme.onPrimary
                                 )
                             }
                         }
@@ -606,14 +605,14 @@ fun SettingsScreen(
                                 enabled = !isMigrating && !isLoading,
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = MaterialTheme.colorScheme.secondary,
-                                    contentColor = Color.White,
+                                    contentColor = MaterialTheme.colorScheme.onSecondary,
                                     disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                                     disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             ) {
                                 Text(
                                     "Внутреннее",
-                                    color = Color.White
+                                    color = MaterialTheme.colorScheme.onSecondary
                                 )
                             }
                         }
@@ -656,7 +655,7 @@ fun SettingsScreen(
                         enabled = !isDeletingSessions,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.error,
-                            contentColor = Color.White,
+                            contentColor = MaterialTheme.colorScheme.onError,
                             disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                             disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -664,7 +663,7 @@ fun SettingsScreen(
                         if (isDeletingSessions) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(20.dp),
-                                color = Color.White
+                                color = MaterialTheme.colorScheme.onError
                             )
                         } else {
                             Icon(
@@ -675,7 +674,7 @@ fun SettingsScreen(
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 "Удалить все сессии",
-                                color = Color.White
+                                color = MaterialTheme.colorScheme.onError
                             )
                         }
                     }

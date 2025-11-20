@@ -6,9 +6,11 @@ import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import xyz.sandboiii.agentcooper.data.repository.ChatRepositoryImpl
 import xyz.sandboiii.agentcooper.data.repository.McpRepositoryImpl
+import xyz.sandboiii.agentcooper.data.repository.ScheduledTaskRepositoryImpl
 import xyz.sandboiii.agentcooper.data.repository.SessionRepositoryImpl
 import xyz.sandboiii.agentcooper.domain.repository.ChatRepository
 import xyz.sandboiii.agentcooper.domain.repository.McpRepository
+import xyz.sandboiii.agentcooper.domain.repository.ScheduledTaskRepository
 import xyz.sandboiii.agentcooper.domain.repository.SessionRepository
 import javax.inject.Singleton
 
@@ -33,5 +35,11 @@ abstract class RepositoryModule {
     abstract fun bindMcpRepository(
         mcpRepositoryImpl: McpRepositoryImpl
     ): McpRepository
+    
+    @Binds
+    @Singleton
+    abstract fun bindScheduledTaskRepository(
+        scheduledTaskRepositoryImpl: ScheduledTaskRepositoryImpl
+    ): ScheduledTaskRepository
 }
 

@@ -380,8 +380,11 @@ class OpenRouterApi @Inject constructor(
                 val choice = jsonResponse.choices?.firstOrNull()
                 val finishReason = choice?.finish_reason
                 
+                Log.d(TAG, "Non-streaming response - finish_reason: $finishReason, has message: ${choice?.message != null}")
+                
                 // Check for tool_calls
                 val messageToolCalls = choice?.message?.tool_calls
+                Log.d(TAG, "Non-streaming response - tool_calls: ${messageToolCalls?.size ?: 0}")
                 if (messageToolCalls != null && messageToolCalls.isNotEmpty()) {
                     val toolCalls = messageToolCalls.mapNotNull { toolCall ->
                         toolCall.id?.let { id ->
@@ -395,12 +398,15 @@ class OpenRouterApi @Inject constructor(
                     Log.d(TAG, "Detected tool calls in non-streaming response: ${toolCalls.size}")
                     emit(MessageChunk(toolCalls = toolCalls, finishReason = finishReason))
                     onToolCalls?.invoke(toolCalls)
+                } else if (finishReason == "tool_calls") {
+                    Log.w(TAG, "Finish reason is tool_calls but no tool_calls found in message")
                 }
                 
                 choice?.message?.content?.let { content ->
+                    Log.d(TAG, "Non-streaming response - content length: ${content.length}")
                     emit(MessageChunk(content = content, finishReason = finishReason))
                 } ?: run {
-                    Log.w(TAG, "No content in non-streaming response")
+                    Log.w(TAG, "No content in non-streaming response (finish_reason: $finishReason)")
                 }
             }
         } catch (e: Exception) {

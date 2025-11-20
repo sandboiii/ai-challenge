@@ -11,17 +11,9 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-private val DarkColorScheme = darkColorScheme(
-    primary = androidx.compose.ui.graphics.Color(0xFF1A1A1A),
-    secondary = androidx.compose.ui.graphics.Color(0xFF2D2D2D),
-    tertiary = androidx.compose.ui.graphics.Color(0xFF3A3A3A)
-)
+private val DarkColorScheme = darkColorScheme()
 
-private val LightColorScheme = lightColorScheme(
-    primary = androidx.compose.ui.graphics.Color(0xFFF5F5F5),
-    secondary = androidx.compose.ui.graphics.Color(0xFFE0E0E0),
-    tertiary = androidx.compose.ui.graphics.Color(0xFFD0D0D0)
-)
+private val LightColorScheme = lightColorScheme()
 
 @Composable
 fun AgentCooperTheme(
