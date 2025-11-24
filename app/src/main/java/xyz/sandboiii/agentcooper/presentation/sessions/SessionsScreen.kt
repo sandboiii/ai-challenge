@@ -10,7 +10,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
@@ -32,7 +31,6 @@ fun SessionsScreen(
     onSessionClick: (String, String) -> Unit,
     onNavigateToModelSelection: () -> Unit = {},
     onNavigateToSettings: () -> Unit = {},
-    onNavigateToScheduledTasks: () -> Unit = {},
     onNavigateToMcpManager: () -> Unit = {},
     viewModel: SessionsViewModel = hiltViewModel()
 ) {
@@ -59,12 +57,6 @@ fun SessionsScreen(
                         Icon(
                             imageVector = Icons.Default.Build,
                             contentDescription = "MCP Servers"
-                        )
-                    }
-                    IconButton(onClick = onNavigateToScheduledTasks) {
-                        Icon(
-                            imageVector = Icons.Default.Schedule,
-                            contentDescription = "Scheduled Tasks"
                         )
                     }
                     IconButton(onClick = onNavigateToSettings) {

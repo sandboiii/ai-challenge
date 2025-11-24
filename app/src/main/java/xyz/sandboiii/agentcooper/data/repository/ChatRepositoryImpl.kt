@@ -230,8 +230,6 @@ class ChatRepositoryImpl @Inject constructor(
 
         // Stream response from API with metadata callback and tool calling support
         try {
-            var allToolCalls = mutableListOf<ToolCallInfo>()
-            
             chatApi.sendMessage(
                 messages, 
                 modelId, 
@@ -246,10 +244,7 @@ class ChatRepositoryImpl @Inject constructor(
                     Log.d(TAG, "Updated token variables: prompt=$promptTokens, completion=$completionTokens, total=$totalTokens, apiCost=$apiCost")
                 },
                 tools = openAITools,
-                onToolCalls = { toolCalls ->
-                    Log.d(TAG, "Received tool calls: ${toolCalls.size}")
-                    allToolCalls.addAll(toolCalls)
-                }
+                onToolCalls = null // Don't use callback - we collect from chunks to avoid duplicates
             ).collect { chunk ->
                 // Handle content chunks
                 chunk.content?.let { content ->
@@ -391,17 +386,7 @@ class ChatRepositoryImpl @Inject constructor(
                             apiCost = (apiCost ?: 0.0) + (metadata.cost ?: 0.0)
                         },
                         tools = openAITools,
-                        onToolCalls = { newToolCalls ->
-                            Log.d(TAG, "Round $roundNumber: Received ${newToolCalls.size} new tool calls")
-                            val newDomainToolCalls = newToolCalls.map { toolCall ->
-                                xyz.sandboiii.agentcooper.domain.model.ToolCall(
-                                    id = toolCall.id,
-                                    name = toolCall.name,
-                                    arguments = toolCall.arguments
-                                )
-                            }
-                            accumulatedToolCalls.addAll(newDomainToolCalls)
-                        }
+                        onToolCalls = null // Don't use callback - we collect from chunks to avoid duplicates
                     ).collect { chunk ->
                         // Handle content chunks
                         chunk.content?.let { content ->
@@ -919,8 +904,6 @@ class ChatRepositoryImpl @Inject constructor(
 
         // Stream response from API with metadata callback and tool calling support
         try {
-            var allToolCalls = mutableListOf<ToolCallInfo>()
-            
             chatApi.sendMessage(
                 messages, 
                 modelId, 
@@ -934,10 +917,7 @@ class ChatRepositoryImpl @Inject constructor(
                     apiCost = metadata.cost
                 },
                 tools = openAITools,
-                onToolCalls = { toolCalls ->
-                    Log.d(TAG, "Received tool calls: ${toolCalls.size}")
-                    allToolCalls.addAll(toolCalls)
-                }
+                onToolCalls = null // Don't use callback - we collect from chunks to avoid duplicates
             ).collect { chunk ->
                 // Handle content chunks
                 chunk.content?.let { content ->
@@ -1076,17 +1056,7 @@ class ChatRepositoryImpl @Inject constructor(
                             apiCost = (apiCost ?: 0.0) + (metadata.cost ?: 0.0)
                         },
                         tools = openAITools,
-                        onToolCalls = { newToolCalls ->
-                            Log.d(TAG, "Round $roundNumber: Received ${newToolCalls.size} new tool calls")
-                            val newDomainToolCalls = newToolCalls.map { toolCall ->
-                                xyz.sandboiii.agentcooper.domain.model.ToolCall(
-                                    id = toolCall.id,
-                                    name = toolCall.name,
-                                    arguments = toolCall.arguments
-                                )
-                            }
-                            accumulatedToolCalls.addAll(newDomainToolCalls)
-                        }
+                        onToolCalls = null // Don't use callback - we collect from chunks to avoid duplicates
                     ).collect { chunk ->
                         chunk.content?.let { content ->
                             roundContent += content

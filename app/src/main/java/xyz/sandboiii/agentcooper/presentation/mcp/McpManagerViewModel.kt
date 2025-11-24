@@ -26,6 +26,8 @@ class McpManagerViewModel @Inject constructor(
     
     val serverUrl = MutableStateFlow("")
     val serverName = MutableStateFlow("")
+    val authorizationToken = MutableStateFlow("")
+    val editingServerId = MutableStateFlow<String?>(null)
     
     init {
         observeServers()
@@ -62,13 +64,15 @@ class McpManagerViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val name = serverName.value.trim().takeIf { it.isNotEmpty() }
-                val result = mcpRepository.connectServer(url, name)
+                val token = authorizationToken.value.trim().takeIf { it.isNotEmpty() }
+                val result = mcpRepository.connectServer(url, name, token)
                 
                 result.fold(
                     onSuccess = {
                         // Clear input fields on success
                         serverUrl.value = ""
                         serverName.value = ""
+                        authorizationToken.value = ""
                         // Clear error
                         val currentState = _state.value
                         if (currentState is McpManagerState.Success) {
@@ -141,7 +145,7 @@ class McpManagerViewModel @Inject constructor(
                 } else {
                     // Server is not connected, try to reconnect
                     Log.d(TAG, "Server not connected, attempting to reconnect: ${server.url}")
-                    val result = mcpRepository.connectServer(server.url, server.name)
+                    val result = mcpRepository.connectServer(server.url, server.name, server.authorizationToken)
                     
                     result.fold(
                         onSuccess = {
@@ -161,6 +165,82 @@ class McpManagerViewModel @Inject constructor(
                 val currentState = _state.value
                 if (currentState is McpManagerState.Success) {
                     _state.value = currentState.copy(error = e.message ?: "Failed to refresh/reconnect")
+                }
+            }
+        }
+    }
+    
+    fun startEditing(serverId: String) {
+        viewModelScope.launch {
+            val server = mcpRepository.getServer(serverId)
+            if (server != null) {
+                editingServerId.value = serverId
+                serverUrl.value = server.url
+                serverName.value = server.name
+                authorizationToken.value = server.authorizationToken ?: ""
+            }
+        }
+    }
+    
+    fun cancelEditing() {
+        editingServerId.value = null
+        serverUrl.value = ""
+        serverName.value = ""
+        authorizationToken.value = ""
+    }
+    
+    fun updateServer() {
+        val serverId = editingServerId.value
+        if (serverId == null) {
+            _state.value = McpManagerState.Success(
+                servers = (_state.value as? McpManagerState.Success)?.servers ?: emptyList(),
+                error = "No server selected for editing"
+            )
+            return
+        }
+        
+        val url = serverUrl.value.trim()
+        if (url.isEmpty()) {
+            _state.value = McpManagerState.Success(
+                servers = (_state.value as? McpManagerState.Success)?.servers ?: emptyList(),
+                error = "URL cannot be empty"
+            )
+            return
+        }
+        
+        viewModelScope.launch {
+            try {
+                val name = serverName.value.trim().takeIf { it.isNotEmpty() }
+                val token = authorizationToken.value.trim().takeIf { it.isNotEmpty() }
+                val result = mcpRepository.updateServer(serverId, url, name, token)
+                
+                result.fold(
+                    onSuccess = {
+                        // Clear input fields and editing state on success
+                        cancelEditing()
+                        // Clear error
+                        val currentState = _state.value
+                        if (currentState is McpManagerState.Success) {
+                            _state.value = currentState.copy(error = null)
+                        }
+                    },
+                    onFailure = { error ->
+                        Log.e(TAG, "Failed to update server", error)
+                        val currentState = _state.value
+                        if (currentState is McpManagerState.Success) {
+                            _state.value = currentState.copy(error = error.message ?: "Failed to update server")
+                        } else {
+                            _state.value = McpManagerState.Error(error.message ?: "Failed to update server")
+                        }
+                    }
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Exception updating server", e)
+                val currentState = _state.value
+                if (currentState is McpManagerState.Success) {
+                    _state.value = currentState.copy(error = e.message ?: "Failed to update server")
+                } else {
+                    _state.value = McpManagerState.Error(e.message ?: "Failed to update server")
                 }
             }
         }

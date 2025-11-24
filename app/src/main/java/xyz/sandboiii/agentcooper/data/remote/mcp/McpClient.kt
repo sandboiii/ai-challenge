@@ -14,6 +14,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import kotlinx.serialization.json.*
+import kotlinx.serialization.json.buildJsonObject
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -21,7 +22,8 @@ import java.util.concurrent.atomic.AtomicInteger
 class McpClient(
     private val serverUrl: String,
     private val clientName: String = "AgentCooper",
-    private val clientVersion: String = "1.0.0"
+    private val clientVersion: String = "1.0.0",
+    private val authorizationToken: String? = null
 ) {
     companion object {
         private const val TAG = "McpClient"
@@ -30,7 +32,7 @@ class McpClient(
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
-        encodeDefaults = false
+        encodeDefaults = true // Must be true to include jsonrpc: "2.0" in JSON-RPC requests
     }
     
     private val client = HttpClient(CIO) {
@@ -38,7 +40,7 @@ class McpClient(
             json(json)
         }
         install(Logging) {
-            level = LogLevel.INFO
+            level = LogLevel.ALL // Log all requests/responses to debug header issues
             logger = object : Logger {
                 override fun log(message: String) {
                     Log.d(TAG, message)
@@ -76,7 +78,16 @@ class McpClient(
         try {
             Log.d(TAG, "Connecting to MCP server: $serverUrl")
             
-            // Step 1: Initialize via POST as per spec
+            // According to MCP spec: https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#session-management
+            // The server assigns the session ID during initialization, NOT the client.
+            // The client should NOT send a session ID in the initial initialize request.
+            // The server will return the session ID in the Mcp-Session-Id header of the InitializeResult response.
+            // Only after receiving the session ID from the server should we include it in subsequent requests.
+            
+            // Clear any existing session ID to start fresh
+            sessionId = null
+            
+            // Step 1: Initialize via POST as per spec (WITHOUT session ID header)
             initialize()
             
             // Step 2: Send InitializedNotification
@@ -105,8 +116,9 @@ class McpClient(
                     client.prepareGet(serverUrl) {
                         header(HttpHeaders.Accept, "text/event-stream")
                         header(HttpHeaders.CacheControl, "no-cache")
-                        sessionId?.let { header("Mcp-Session-Id", it) }
-                        header("MCP-Protocol-Version", protocolVersion)
+                        sessionId?.let { header("mcp-session-id", it) }
+                        // header("MCP-Protocol-Version", protocolVersion)
+                        authorizationToken?.let { header(HttpHeaders.Authorization, "Bearer $it") }
                     }.execute { httpResponse ->
                         if (httpResponse.status.value == 405) {
                             // Server doesn't support GET/SSE stream, that's okay
@@ -188,16 +200,28 @@ class McpClient(
         }
         
         try {
-            val params = InitializeParams(
-                clientInfo = ClientInfo(
-                    name = clientName,
-                    version = clientVersion
-                )
-            )
+            // According to MCP spec, initialize should include clientInfo and protocolVersion
+            // The Notion server's isInitializeRequest() checks for method === 'initialize'
+            // According to MCP SDK's isInitializeRequest() function:
+            // - params must be an object and not null
+            // - params.capabilities must be an object and not null (can be empty {})
+            // See: https://github.com/modelcontextprotocol/typescript-sdk/blob/main/src/types.ts
+            val params = buildJsonObject {
+                put("clientInfo", buildJsonObject {
+                    put("name", clientName)
+                    put("version", clientVersion)
+                })
+                // Include protocolVersion as per MCP spec
+                put("protocolVersion", protocolVersion)
+                // capabilities must be present as an object (not null) for isInitializeRequest() to pass
+                put("capabilities", buildJsonObject {
+                    // Empty capabilities object is valid
+                })
+            }
             
             val result = sendRequest<InitializeResult>(
                 method = "initialize",
-                params = json.encodeToJsonElement(params),
+                params = params,
                 isInitialization = true
             )
             
@@ -216,18 +240,19 @@ class McpClient(
     
     private suspend fun sendInitializedNotification() {
         try {
-            val notification = JsonRpcRequest(
-                id = null, // Notifications have no id
+            // Notifications must NOT have an id field, and params must be an object (not null)
+            val notification = JsonRpcNotification(
                 method = "notifications/initialized",
-                params = null
+                params = buildJsonObject {} // Empty object, not null
             )
             
             val response = client.post(serverUrl) {
                 header(HttpHeaders.ContentType, ContentType.Application.Json)
                 header(HttpHeaders.Accept, "application/json, text/event-stream")
-                sessionId?.let { header("Mcp-Session-Id", it) }
                 header("MCP-Protocol-Version", protocolVersion)
-                setBody(json.encodeToString(JsonRpcRequest.serializer(), notification))
+                sessionId?.let { header("mcp-session-id", it) }
+                authorizationToken?.let { header(HttpHeaders.Authorization, "Bearer $it") }
+                setBody(json.encodeToString(JsonRpcNotification.serializer(), notification))
             }
             
             // For notifications, server should return 202 Accepted
@@ -246,9 +271,10 @@ class McpClient(
         ensureConnected()
         
         try {
+            // params must be an object (not null) according to MCP SDK validation
             val result = sendRequest<ToolsListResult>(
                 method = "tools/list",
-                params = null
+                params = buildJsonObject {} // Empty object, not null
             )
             
             return result?.tools ?: emptyList()
@@ -297,31 +323,89 @@ class McpClient(
         isInitialization: Boolean = false
     ): T? {
         val id = requestIdCounter.getAndIncrement().toString()
+        // MCP SDK requires params to be an object (not null) - use empty object if null
+        val requestParams = params ?: buildJsonObject {}
         val request = JsonRpcRequest(
             id = id,
             method = method,
-            params = params
+            params = requestParams
         )
         
         val deferred = CompletableDeferred<JsonRpcResponse>()
         pendingRequests[id] = deferred
         
         try {
+            val requestBody = json.encodeToString(JsonRpcRequest.serializer(), request)
+            Log.d(TAG, "Sending request: $requestBody")
+            
+            // Build headers list for logging
+            val headersList = mutableListOf<String>()
+            
             // Send request via POST as per MCP spec
+            // According to Notion MCP server docs: https://github.com/makenotion/notion-mcp-server
+            // Required headers: Authorization (Bearer token), Content-Type, mcp-session-id
             val response = client.post(serverUrl) {
                 header(HttpHeaders.ContentType, ContentType.Application.Json)
+                headersList.add("Content-Type: application/json")
+                
                 header(HttpHeaders.Accept, "application/json, text/event-stream")
-                sessionId?.let { header("Mcp-Session-Id", it) }
+                headersList.add("Accept: application/json, text/event-stream")
+                
+                // According to MCP spec: https://modelcontextprotocol.io/specification/2025-06-18/basic/transports
+                // Client MUST include MCP-Protocol-Version header on all requests
                 header("MCP-Protocol-Version", protocolVersion)
-                setBody(json.encodeToString(JsonRpcRequest.serializer(), request))
+                headersList.add("MCP-Protocol-Version: $protocolVersion")
+                
+                // According to MCP spec: https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#session-management
+                // Session ID is assigned by the SERVER during initialization, not the client.
+                // For the initial initialize request, we should NOT send a session ID.
+                // For subsequent requests (after initialization), we MUST include the session ID
+                // that was returned by the server in the InitializeResult response.
+                // Notion server checks req.headers['mcp-session-id'] (lowercase) - use lowercase to match
+                sessionId?.let { session ->
+                    // Include session ID for requests AFTER initialization
+                    // Use lowercase 'mcp-session-id' to match Notion server's header check
+                    header("mcp-session-id", session)
+                    headersList.add("mcp-session-id: $session")
+                    Log.d(TAG, "Including session ID in request header 'mcp-session-id': $session")
+                } ?: run {
+                    // No session ID is expected for the initial initialize request
+                    // Notion server expects: !sessionId && isInitializeRequest(req.body)
+                    if (isInitialization) {
+                        Log.d(TAG, "Initial request - no session ID header (server will assign one)")
+                    } else {
+                        Log.w(TAG, "WARNING: No session ID available for non-initialization request!")
+                    }
+                }
+                
+                // Authorization header (if token provided)
+                authorizationToken?.let { token ->
+                    header(HttpHeaders.Authorization, "Bearer $token")
+                    headersList.add("Authorization: Bearer ***")
+                }
+                
+                setBody(requestBody)
             }
             
+            Log.d(TAG, "Request headers sent: ${headersList.joinToString(", ")}")
+            Log.d(TAG, "Response status: ${response.status.value} ${response.status.description}")
+            Log.d(TAG, "Response headers: ${response.headers.entries()}")
+            
             // Check for session ID in response (during initialization)
+            // According to MCP spec, server assigns session ID and returns it in Mcp-Session-Id header
+            // See: https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#session-management
+            // Notion server returns it in 'mcp-session-id' header (lowercase)
             if (isInitialization) {
-                val receivedSessionId = response.headers["Mcp-Session-Id"]
+                // Try header name variations (Notion server uses lowercase 'mcp-session-id')
+                val receivedSessionId = response.headers["mcp-session-id"]
+                    ?: response.headers["Mcp-Session-Id"]
+                    ?: response.headers["MCP-Session-Id"]
                 if (receivedSessionId != null) {
                     sessionId = receivedSessionId
-                    Log.d(TAG, "Received session ID: $sessionId")
+                    Log.d(TAG, "Received session ID from server in InitializeResult: $sessionId")
+                    Log.d(TAG, "Will include this session ID in all subsequent requests")
+                } else {
+                    Log.d(TAG, "Server did not return a session ID - session management not required")
                 }
             }
             
@@ -331,7 +415,18 @@ class McpClient(
                 // Single JSON response
                 contentType.contains("application/json") -> {
                     if (response.status.value !in 200..299) {
-                        throw Exception("HTTP ${response.status.value}: ${response.status.description}")
+                        // Try to read error response body
+                        try {
+                            val errorBody = response.body<String>()
+                            Log.e(TAG, "Error response body: $errorBody")
+                            throw Exception("HTTP ${response.status.value}: ${response.status.description}\nResponse: $errorBody")
+                        } catch (e: Exception) {
+                            if (e.message?.contains("HTTP") == true) {
+                                throw e
+                            }
+                            Log.e(TAG, "Failed to read error response body", e)
+                            throw Exception("HTTP ${response.status.value}: ${response.status.description}")
+                        }
                     }
                     
                     val jsonRpcResponse = response.body<JsonRpcResponse>()
@@ -430,8 +525,9 @@ class McpClient(
         sessionId?.let { sid ->
             try {
                 client.delete(serverUrl) {
-                    header("Mcp-Session-Id", sid)
-                    header("MCP-Protocol-Version", protocolVersion)
+                    header("mcp-session-id", sid)
+                    // header("MCP-Protocol-Version", protocolVersion)
+                    authorizationToken?.let { header(HttpHeaders.Authorization, "Bearer $it") }
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to send session termination", e)

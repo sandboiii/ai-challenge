@@ -12,7 +12,6 @@ import dagger.hilt.components.SingletonComponent
 import xyz.sandboiii.agentcooper.data.remote.api.ChatApi
 import xyz.sandboiii.agentcooper.data.remote.api.OpenRouterApi
 import xyz.sandboiii.agentcooper.util.Constants
-import xyz.sandboiii.agentcooper.util.NotificationManager
 import javax.inject.Singleton
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = Constants.PREF_DATASTORE_NAME)
@@ -35,12 +34,5 @@ object NetworkModule {
         return OpenRouterApi(preferencesManager)
     }
     
-    @Provides
-    @Singleton
-    fun provideNotificationManager(
-        @ApplicationContext context: Context
-    ): NotificationManager {
-        return NotificationManager(context)
-    }
 }
 

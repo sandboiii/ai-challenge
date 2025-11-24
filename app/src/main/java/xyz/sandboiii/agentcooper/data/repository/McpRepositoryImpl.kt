@@ -17,7 +17,8 @@ import javax.inject.Singleton
 data class McpServerConfig(
     val id: String,
     val name: String,
-    val url: String
+    val url: String,
+    val authorizationToken: String? = null
 )
 
 @Singleton
@@ -66,7 +67,8 @@ class McpRepositoryImpl @Inject constructor(
                     name = config.name,
                     url = config.url,
                     state = McpConnectionState.DISCONNECTED,
-                    tools = emptyList()
+                    tools = emptyList(),
+                    authorizationToken = config.authorizationToken
                 )
             }
             _servers.value = serverInfos
@@ -81,7 +83,8 @@ class McpRepositoryImpl @Inject constructor(
                 McpServerConfig(
                     id = server.id,
                     name = server.name,
-                    url = server.url
+                    url = server.url,
+                    authorizationToken = server.authorizationToken
                 )
             }
             val jsonString = json.encodeToString(configs)
@@ -101,12 +104,13 @@ class McpRepositoryImpl @Inject constructor(
         }
     }
     
-    override suspend fun connectServer(url: String, name: String?): Result<String> {
+    override suspend fun connectServer(url: String, name: String?, authorizationToken: String?): Result<String> {
         return try {
             // Check if server already exists
             val existingServer = _servers.value.find { it.url == url }
             val serverId = existingServer?.id ?: UUID.randomUUID().toString()
             val serverName = name ?: existingServer?.name ?: "MCP Server"
+            val token = authorizationToken?.takeIf { it.isNotBlank() } ?: existingServer?.authorizationToken
             
             // If server doesn't exist, add it
             if (existingServer == null) {
@@ -115,31 +119,48 @@ class McpRepositoryImpl @Inject constructor(
                     name = serverName,
                     url = url,
                     state = McpConnectionState.CONNECTING,
-                    tools = emptyList()
+                    tools = emptyList(),
+                    authorizationToken = token
                 )
                 _servers.value = _servers.value + newServer
                 saveServers()
             } else {
-                updateServer(serverId) { it.copy(state = McpConnectionState.CONNECTING) }
+                // Update existing server with new token if provided, or keep existing token
+                updateServer(serverId) { 
+                    it.copy(
+                        state = McpConnectionState.CONNECTING,
+                        authorizationToken = token ?: it.authorizationToken
+                    )
+                }
             }
             
-            // Create or get client
-            val client = clients.getOrPut(serverId) {
-                McpClient(url, "AgentCooper", "1.0.0")
+            // Create or get client (recreate if token changed)
+            val currentServer = _servers.value.find { it.id == serverId }
+            val existingClient = clients[serverId]
+            
+            // If token changed, recreate client
+            val finalClient = if (existingClient != null && currentServer?.authorizationToken != token) {
+                existingClient.close()
+                clients.remove(serverId)
+                McpClient(url, "AgentCooper", "1.0.0", token).also { clients[serverId] = it }
+            } else {
+                clients.getOrPut(serverId) {
+                    McpClient(url, "AgentCooper", "1.0.0", token)
+                }
             }
             
             // Connect
-            client.connect()
+            finalClient.connect()
             
             // Wait a bit for connection
             kotlinx.coroutines.delay(1000)
             
             // Check connection state
-            val connectionState = client.connectionState.value
+            val connectionState = finalClient.connectionState.value
             if (connectionState == McpConnectionState.CONNECTED) {
                 // List tools
                 val tools = try {
-                    client.listTools()
+                    finalClient.listTools()
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to list tools", e)
                     emptyList()
@@ -149,13 +170,14 @@ class McpRepositoryImpl @Inject constructor(
                     it.copy(
                         state = McpConnectionState.CONNECTED,
                         tools = tools,
-                        error = null
+                        error = null,
+                        authorizationToken = token ?: it.authorizationToken
                     )
                 }
                 
                 Result.success(serverId)
             } else {
-                val error = client.error.value ?: "Connection failed"
+                val error = finalClient.error.value ?: "Connection failed"
                 updateServer(serverId) {
                     it.copy(
                         state = McpConnectionState.ERROR,
@@ -183,6 +205,46 @@ class McpRepositoryImpl @Inject constructor(
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to disconnect server", e)
+        }
+    }
+    
+    override suspend fun updateServer(serverId: String, url: String, name: String?, authorizationToken: String?): Result<Unit> {
+        return try {
+            val existingServer = _servers.value.find { it.id == serverId }
+            if (existingServer == null) {
+                return Result.failure(Exception("Server not found: $serverId"))
+            }
+            
+            val urlChanged = existingServer.url != url
+            val tokenChanged = existingServer.authorizationToken != authorizationToken
+            
+            // If URL or token changed, disconnect and recreate client
+            if (urlChanged || tokenChanged) {
+                clients[serverId]?.disconnect()
+                clients.remove(serverId)
+            }
+            
+            // Update server info
+            val updatedName = name?.takeIf { it.isNotBlank() } ?: existingServer.name
+            val updatedToken = authorizationToken?.takeIf { it.isNotBlank() } ?: existingServer.authorizationToken
+            
+            updateServer(serverId) {
+                it.copy(
+                    url = url,
+                    name = updatedName,
+                    authorizationToken = updatedToken,
+                    state = if (urlChanged || tokenChanged) McpConnectionState.DISCONNECTED else it.state,
+                    error = null
+                )
+            }
+            
+            // Save updated configuration
+            saveServers()
+            
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to update server", e)
+            Result.failure(e)
         }
     }
     

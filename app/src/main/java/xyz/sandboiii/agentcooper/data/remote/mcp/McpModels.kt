@@ -17,6 +17,14 @@ data class JsonRpcRequest(
     val params: JsonElement? = null
 )
 
+// JSON-RPC Notification (no id field, params must be object)
+@Serializable
+data class JsonRpcNotification(
+    val jsonrpc: String = "2.0",
+    val method: String,
+    val params: JsonElement? = null
+)
+
 @Serializable
 data class JsonRpcResponse(
     val jsonrpc: String = "2.0",
@@ -151,7 +159,8 @@ data class McpServerInfo(
     val url: String,
     val state: McpConnectionState,
     val error: String? = null,
-    val tools: List<McpTool> = emptyList()
+    val tools: List<McpTool> = emptyList(),
+    val authorizationToken: String? = null
 )
 
 // OpenAI-Compatible Tool Format

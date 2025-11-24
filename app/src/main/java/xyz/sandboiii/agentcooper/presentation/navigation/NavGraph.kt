@@ -12,7 +12,6 @@ import java.nio.charset.StandardCharsets
 import xyz.sandboiii.agentcooper.presentation.chat.ChatScreen
 import xyz.sandboiii.agentcooper.presentation.mcp.McpManagerScreen
 import xyz.sandboiii.agentcooper.presentation.model_selection.ModelSelectionScreen
-import xyz.sandboiii.agentcooper.presentation.scheduled_tasks.ScheduledTasksScreen
 import xyz.sandboiii.agentcooper.presentation.sessions.SessionsScreen
 import xyz.sandboiii.agentcooper.presentation.settings.SettingsScreen
 
@@ -30,7 +29,6 @@ sealed class Screen(val route: String) {
     data object ModelSelection : Screen("model_selection")
     data object Settings : Screen("settings")
     data object McpManager : Screen("mcp_manager")
-    data object ScheduledTasks : Screen("scheduled_tasks")
 }
 
 @Composable
@@ -52,9 +50,6 @@ fun NavGraph(
                 },
                 onNavigateToSettings = {
                     navController.navigate(Screen.Settings.route)
-                },
-                onNavigateToScheduledTasks = {
-                    navController.navigate(Screen.ScheduledTasks.route)
                 },
                 onNavigateToMcpManager = {
                     navController.navigate(Screen.McpManager.route)
@@ -105,10 +100,5 @@ fun NavGraph(
             )
         }
         
-        composable(Screen.ScheduledTasks.route) {
-            ScheduledTasksScreen(
-                onNavigateBack = { navController.popBackStack() }
-            )
-        }
     }
 }

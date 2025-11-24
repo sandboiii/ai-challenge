@@ -9,7 +9,8 @@ interface McpRepository {
     val servers: Flow<List<McpServerInfo>>
     val allTools: Flow<List<McpTool>>
     
-    suspend fun connectServer(url: String, name: String? = null): Result<String> // Returns server ID
+    suspend fun connectServer(url: String, name: String? = null, authorizationToken: String? = null): Result<String> // Returns server ID
+    suspend fun updateServer(serverId: String, url: String, name: String?, authorizationToken: String?): Result<Unit>
     suspend fun disconnectServer(serverId: String)
     suspend fun deleteServer(serverId: String)
     suspend fun getServer(serverId: String): McpServerInfo?

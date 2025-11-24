@@ -14,6 +14,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -29,6 +31,28 @@ fun McpManagerScreen(
     val state by viewModel.state.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = McpManagerState.Loading)
     val serverUrl by viewModel.serverUrl.collectAsStateWithLifecycle()
     val serverName by viewModel.serverName.collectAsStateWithLifecycle()
+    val authorizationToken by viewModel.authorizationToken.collectAsStateWithLifecycle()
+    val editingServerId by viewModel.editingServerId.collectAsStateWithLifecycle()
+    
+    var isFormVisible by remember { mutableStateOf(false) }
+    
+    // Show form when editing starts
+    LaunchedEffect(editingServerId) {
+        if (editingServerId != null) {
+            isFormVisible = true
+        }
+    }
+    
+    // Hide form after successful connection or update
+    LaunchedEffect(state) {
+        if (state is McpManagerState.Success) {
+            val successState = state as McpManagerState.Success
+            // Check if we just successfully connected/updated (no error and form fields are cleared)
+            if (successState.error == null && serverUrl.isEmpty() && serverName.isEmpty() && authorizationToken.isEmpty() && editingServerId == null) {
+                isFormVisible = false
+            }
+        }
+    }
     
     Scaffold(
         topBar = {
@@ -42,6 +66,26 @@ fun McpManagerScreen(
                             contentDescription = "Back"
                         )
                     }
+                },
+                actions = {
+                    if (editingServerId != null) {
+                        IconButton(onClick = { 
+                            viewModel.cancelEditing()
+                            isFormVisible = false
+                        }) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Cancel editing"
+                            )
+                        }
+                    } else {
+                        IconButton(onClick = { isFormVisible = !isFormVisible }) {
+                            Icon(
+                                imageVector = if (isFormVisible) Icons.Default.Close else Icons.Default.Add,
+                                contentDescription = if (isFormVisible) "Hide form" else "Add server"
+                            )
+                        }
+                    }
                 }
             )
         }
@@ -52,8 +96,9 @@ fun McpManagerScreen(
                 .padding(padding)
                 .padding(horizontal = 16.dp)
         ) {
-            // Connection form
-            Card(
+            // Connection form (only show when isFormVisible is true)
+            if (isFormVisible) {
+                Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 8.dp),
@@ -64,7 +109,7 @@ fun McpManagerScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text(
-                        text = "Connect to MCP Server",
+                        text = if (editingServerId != null) "Edit MCP Server" else "Connect to MCP Server",
                         style = MaterialTheme.typography.titleMedium
                     )
                     
@@ -86,19 +131,68 @@ fun McpManagerScreen(
                         singleLine = true
                     )
                     
-                    Button(
-                        onClick = { viewModel.connectServer() },
-                        modifier = Modifier.fillMaxWidth()
+                    var tokenVisible by remember { mutableStateOf(false) }
+                    OutlinedTextField(
+                        value = authorizationToken,
+                        onValueChange = { viewModel.authorizationToken.value = it },
+                        label = { Text("Authorization Token (optional)") },
+                        placeholder = { Text("Bearer token for authentication") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        visualTransformation = if (tokenVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { tokenVisible = !tokenVisible }) {
+                                Icon(
+                                    imageVector = if (tokenVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                    contentDescription = if (tokenVisible) "Hide token" else "Show token"
+                                )
+                            }
+                        }
+                    )
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Connect")
+                        if (editingServerId != null) {
+                            OutlinedButton(
+                                onClick = { 
+                                    viewModel.cancelEditing()
+                                    isFormVisible = false
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Cancel")
+                            }
+                            Button(
+                                onClick = { viewModel.updateServer() },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Update")
+                            }
+                        } else {
+                            Button(
+                                onClick = { viewModel.connectServer() },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Connect")
+                            }
+                        }
                     }
                 }
+            }
             }
             
             // Error message
@@ -194,6 +288,7 @@ fun McpManagerScreen(
                             items(currentState.servers) { server ->
                                 McpServerCard(
                                     server = server,
+                                    onEdit = { viewModel.startEditing(server.id) },
                                     onDisconnect = { viewModel.disconnectServer(server.id) },
                                     onDelete = { viewModel.deleteServer(server.id) },
                                     onRefreshTools = { viewModel.refreshTools(server.id) }
@@ -210,6 +305,7 @@ fun McpManagerScreen(
 @Composable
 fun McpServerCard(
     server: xyz.sandboiii.agentcooper.data.remote.mcp.McpServerInfo,
+    onEdit: () -> Unit,
     onDisconnect: () -> Unit,
     onDelete: () -> Unit,
     onRefreshTools: () -> Unit
@@ -296,6 +392,18 @@ fun McpServerCard(
                 )
                 
                 Row {
+                    IconButton(
+                        onClick = onEdit,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Edit",
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    
                     IconButton(
                         onClick = onRefreshTools,
                         modifier = Modifier.size(32.dp)
