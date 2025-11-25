@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshotFlow
@@ -315,6 +316,7 @@ fun MessageBubble(
     val isUser = message.role == MessageRole.USER
     val isSummary = message.role == MessageRole.SUMMARY
     var isSummaryExpanded by remember(message.id) { mutableStateOf(false) }
+    var showRagContextDialog by remember(message.id) { mutableStateOf(false) }
     
     val slideIn = remember {
         slideInHorizontally(
@@ -495,6 +497,30 @@ fun MessageBubble(
                                 Spacer(modifier = Modifier.height(8.dp))
                             }
                             
+                            // Show RAG context button if available (for user messages)
+                            if (isUser && message.ragContext != null) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Button(
+                                    onClick = { showRagContextDialog = true },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.secondary,
+                                        contentColor = MaterialTheme.colorScheme.onSecondary
+                                    )
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Info,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Показать RAG контекст",
+                                        style = MaterialTheme.typography.labelMedium
+                                    )
+                                }
+                            }
+                            
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.fillMaxWidth()
@@ -625,6 +651,51 @@ fun MessageBubble(
                 }
             }
         }
+    }
+    
+    // RAG Context Dialog
+    if (showRagContextDialog && message.ragContext != null) {
+        AlertDialog(
+            onDismissRequest = { showRagContextDialog = false },
+            title = {
+                Text(
+                    text = "RAG Context",
+                    style = MaterialTheme.typography.titleLarge
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Контекстные фрагменты, использованные для дополнения запроса:",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = message.ragContext,
+                            modifier = Modifier.padding(12.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showRagContextDialog = false }) {
+                    Text("Закрыть")
+                }
+            }
+        )
     }
 }
 

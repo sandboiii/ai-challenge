@@ -54,6 +54,7 @@ fun SettingsScreen(
     val isMigrating by viewModel.isMigrating.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
     val migrationSuccess by viewModel.migrationSuccess.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
     val temperature by viewModel.temperature.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = Constants.DEFAULT_TEMPERATURE)
+    val ragEnabled by viewModel.ragEnabled.collectAsStateWithLifecycle(lifecycle = lifecycle, initialValue = false)
     
     var showDeleteConfirmation by remember { mutableStateOf(false) }
     
@@ -386,6 +387,50 @@ fun SettingsScreen(
                         Switch(
                             checked = welcomeMessageEnabled,
                             onCheckedChange = { viewModel.updateWelcomeMessageEnabled(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                uncheckedThumbColor = MaterialTheme.colorScheme.outline,
+                                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        )
+                    }
+                }
+            }
+            
+            // RAG Context Augmentation Toggle Section
+            Card(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = "Enable RAG Context Augmentation (Local Server)",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            
+                            Text(
+                                text = "Augment queries with relevant context from local RAG server at http://10.0.2.2:8000",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        
+                        Switch(
+                            checked = ragEnabled,
+                            onCheckedChange = { viewModel.updateRagEnabled(it) },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
                                 checkedTrackColor = MaterialTheme.colorScheme.primary,

@@ -14,7 +14,8 @@ data class ChatMessage(
     val totalCost: Double? = null, // Total cost in dollars
     val summarizationContent: String? = null, // Summary text (only for SUMMARY role messages)
     val toolCalls: List<ToolCall>? = null, // Tool calls made by the assistant
-    val toolResults: List<ToolResult>? = null // Results from tool executions
+    val toolResults: List<ToolResult>? = null, // Results from tool executions
+    val ragContext: String? = null // RAG context chunks used for augmentation (only for USER role messages)
 )
 
 data class ToolCall(

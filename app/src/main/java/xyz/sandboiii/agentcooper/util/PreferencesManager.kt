@@ -26,6 +26,7 @@ class PreferencesManager @Inject constructor(
         private val TEMPERATURE = floatPreferencesKey(Constants.PREF_TEMPERATURE)
         private val TOKEN_THRESHOLD = intPreferencesKey(Constants.PREF_TOKEN_THRESHOLD)
         private val STORAGE_LOCATION = stringPreferencesKey(Constants.PREF_STORAGE_LOCATION)
+        private val RAG_ENABLED = booleanPreferencesKey(Constants.PREF_RAG_ENABLED)
         private val MCP_SERVERS = stringPreferencesKey("mcp_servers")
     }
     
@@ -36,6 +37,7 @@ class PreferencesManager @Inject constructor(
     val temperature: Flow<Float> = dataStore.data.map { it[TEMPERATURE] ?: Constants.DEFAULT_TEMPERATURE }
     val tokenThreshold: Flow<Int?> = dataStore.data.map { it[TOKEN_THRESHOLD] }
     val storageLocation: Flow<String?> = dataStore.data.map { it[STORAGE_LOCATION] }
+    val ragEnabled: Flow<Boolean> = dataStore.data.map { it[RAG_ENABLED] ?: false }
     
     suspend fun setApiKey(key: String) {
         dataStore.edit { it[API_KEY] = key }
@@ -127,6 +129,16 @@ class PreferencesManager @Inject constructor(
     suspend fun setMcpServers(serversJson: String) {
         dataStore.edit { preferences ->
             preferences[MCP_SERVERS] = serversJson
+        }
+    }
+    
+    suspend fun getRagEnabled(): Boolean {
+        return dataStore.data.first()[RAG_ENABLED] ?: false
+    }
+    
+    suspend fun setRagEnabled(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[RAG_ENABLED] = enabled
         }
     }
 }

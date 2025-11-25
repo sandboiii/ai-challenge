@@ -24,6 +24,7 @@ import xyz.sandboiii.agentcooper.domain.repository.SessionRepository
 import xyz.sandboiii.agentcooper.util.Constants
 import xyz.sandboiii.agentcooper.util.PreferencesManager
 import xyz.sandboiii.agentcooper.util.TokenCounter
+import xyz.sandboiii.agentcooper.util.ChatProcessor
 import xyz.sandboiii.agentcooper.data.remote.mcp.toOpenAITool
 import xyz.sandboiii.agentcooper.data.remote.dto.ToolCall
 import xyz.sandboiii.agentcooper.data.remote.api.ToolCallInfo
@@ -40,7 +41,8 @@ class ChatRepositoryImpl @Inject constructor(
     private val sessionFileStorage: SessionFileStorage,
     private val sessionRepository: SessionRepository,
     private val preferencesManager: PreferencesManager,
-    private val mcpRepository: McpRepository
+    private val mcpRepository: McpRepository,
+    private val chatProcessor: ChatProcessor
 ) : ChatRepository {
     
     companion object {
@@ -109,16 +111,22 @@ class ChatRepositoryImpl @Inject constructor(
         // Check if this is the first user message (to generate title)
         val isFirstUserMessage = existingMessages.none { it.role == MessageRole.USER }
         
+        // RAG Integration: Augment the user query if RAG is enabled
+        // Note: We save the original content to session, but use augmented content for API calls
+        val ragResult = chatProcessor.getFinalPromptWithContext(content)
+        val augmentedContent = ragResult.augmentedPrompt
+        val ragContext = ragResult.contextChunks?.joinToString("\n\n") // Join context chunks with double newline
+        
         // Get system prompt
         val systemPrompt = preferencesManager.getSystemPrompt() ?: Constants.DEFAULT_SYSTEM_PROMPT
         
         // Build initial message context for token counting
         // IMPORTANT: Count ALL tokens including summary content, matching what will be sent to the API
-        // Include the new user message content for accurate token counting
+        // Include the new user message content (augmented if RAG enabled) for accurate token counting
         val initialMessages = buildMessageContext(
             messages = existingMessages,
             systemPrompt = systemPrompt,
-            newUserMessageContent = content
+            newUserMessageContent = augmentedContent
         )
         
         // Log token counting info
@@ -160,23 +168,29 @@ class ChatRepositoryImpl @Inject constructor(
                 summarizeMessages(sessionId, modelId, existingMessages, storageLocation)
             } finally {
                 // Save user message BEFORE clearing summarization state to ensure it's in file when ViewModel reloads
+                // IMPORTANT: Save only the original content (not augmented) to session history
+                // But save RAG context as a separate field if available
                 val userMessage = ChatMessage(
                     id = UUID.randomUUID().toString(),
-                    content = content,
+                    content = content, // Save original content, not augmented
                     role = MessageRole.USER,
                     timestamp = System.currentTimeMillis(),
-                    sessionId = sessionId
+                    sessionId = sessionId,
+                    ragContext = ragContext // Save RAG context as separate field
                 )
                 sessionFileStorage.addMessageToSession(session, userMessage, storageLocation)
                 _isSummarizing.value = false // Update summarization state (after user message is saved)
             }
         } else {
+            // IMPORTANT: Save only the original content (not augmented) to session history
+            // But save RAG context as a separate field if available
             val userMessage = ChatMessage(
                 id = UUID.randomUUID().toString(),
-                content = content,
+                content = content, // Save original content, not augmented
                 role = MessageRole.USER,
                 timestamp = System.currentTimeMillis(),
-                sessionId = sessionId
+                sessionId = sessionId,
+                ragContext = ragContext // Save RAG context as separate field
             )
             sessionFileStorage.addMessageToSession(session, userMessage, storageLocation)
         }
@@ -184,17 +198,33 @@ class ChatRepositoryImpl @Inject constructor(
         // Re-fetch messages after potential summarization
         val messagesAfterSummarization = loadMessagesFromFile(sessionId)
         
-        // Build final message context using the same function
-        // The current user message is already included in messagesAfterSummarization since we saved it above
+        // Build final message context for API call
+        // Replace the last user message content with augmented version for API call
         val messages = buildMessageContext(
             messages = messagesAfterSummarization,
             systemPrompt = systemPrompt,
             newUserMessageContent = null // User message is already in messagesAfterSummarization
         )
         
+        // Replace the last user message content with augmented version for API call
+        // This ensures we send augmented content to API but keep original in session history
+        val messagesForApi = messages.mapIndexed { index, message ->
+            if (index == messages.size - 1 && message.role == "user") {
+                // This is the last user message - replace with augmented content
+                ChatMessageDto(
+                    role = message.role,
+                    content = augmentedContent,
+                    toolCallId = message.toolCallId,
+                    toolCalls = message.toolCalls
+                )
+            } else {
+                message
+            }
+        }
+        
         // Log final message context - each message on a separate line
-        Log.d(TAG, "Final message context (${messages.size} messages):")
-        messages.forEachIndexed { index, message ->
+        Log.d(TAG, "Final message context (${messagesForApi.size} messages):")
+        messagesForApi.forEachIndexed { index, message ->
             Log.d(TAG, "  [$index] ${message.role}: ${message.content}")
         }
         
@@ -229,9 +259,10 @@ class ChatRepositoryImpl @Inject constructor(
         Log.d(TAG, "Available MCP tools: ${mcpTools.size}")
 
         // Stream response from API with metadata callback and tool calling support
+        // Use messagesForApi which has augmented content for the last user message
         try {
             chatApi.sendMessage(
-                messages, 
+                messagesForApi, 
                 modelId, 
                 stream = true,
                 onMetadata = { metadata ->
@@ -267,7 +298,8 @@ class ChatRepositoryImpl @Inject constructor(
             }
             
             // Execute tool calls iteratively - AI can make multiple rounds of tool calls
-            var currentMessages = messages.toMutableList()
+            // Use messagesForApi which has augmented content for the last user message
+            var currentMessages = messagesForApi.toMutableList()
             var roundNumber = 1
             val maxRounds = 5 // Prevent infinite loops
             
@@ -566,6 +598,7 @@ class ChatRepositoryImpl @Inject constructor(
         sessionFileStorage.addMessageToSession(session, assistantMessage, storageLocation)
         
         // Generate title from API if this is the first user message
+        // Use original content (not augmented) for title generation
         if (isFirstUserMessage && accumulatedContent.isNotEmpty()) {
             try {
                 val generatedTitle = chatApi.generateTitle(content, accumulatedContent, modelId)
@@ -800,6 +833,12 @@ class ChatRepositoryImpl @Inject constructor(
         // Check if this is the first user message (to generate title)
         val isFirstUserMessage = existingMessages.none { it.role == MessageRole.USER }
         
+        // RAG Integration: Augment the user query if RAG is enabled
+        // Note: We save the original content to session, but use augmented content for API calls
+        val ragResult = chatProcessor.getFinalPromptWithContext(content)
+        val augmentedContent = ragResult.augmentedPrompt
+        val ragContext = ragResult.contextChunks?.joinToString("\n\n") // Join context chunks with double newline
+        
         // Get system prompt
         val systemPrompt = preferencesManager.getSystemPrompt() ?: Constants.DEFAULT_SYSTEM_PROMPT
         
@@ -807,7 +846,7 @@ class ChatRepositoryImpl @Inject constructor(
         val initialMessages = buildMessageContext(
             messages = existingMessages,
             systemPrompt = systemPrompt,
-            newUserMessageContent = content
+            newUserMessageContent = augmentedContent
         )
         
         // Log token counting info
@@ -835,7 +874,7 @@ class ChatRepositoryImpl @Inject constructor(
         
         // Get session for updating
         val session = sessionRepository.getSessionById(sessionId)
-            ?: throw IllegalStateException("Session not found: $sessionId")
+        ?: throw IllegalStateException("Session not found: $sessionId")
         
         // If threshold is set and token count exceeds it, perform summarization BEFORE saving user message
         if (effectiveThreshold != null && tokenCount > effectiveThreshold) {
@@ -844,24 +883,29 @@ class ChatRepositoryImpl @Inject constructor(
             try {
                 summarizeMessages(sessionId, modelId, existingMessages, storageLocation)
             } finally {
+                // IMPORTANT: Save only the original content (not augmented) to session history
+                // But save RAG context as a separate field if available
                 val userMessage = ChatMessage(
                     id = UUID.randomUUID().toString(),
-                    content = content,
+                    content = content, // Save original content, not augmented
                     role = MessageRole.USER,
                     timestamp = System.currentTimeMillis(),
-                    sessionId = sessionId
+                    sessionId = sessionId,
+                    ragContext = ragContext // Save RAG context as separate field
                 )
                 sessionFileStorage.addMessageToSession(session, userMessage, storageLocation)
                 _isSummarizing.value = false
             }
         } else {
-            // Save user message immediately if no summarization needed
+            // IMPORTANT: Save only the original content (not augmented) to session history
+            // But save RAG context as a separate field if available
             val userMessage = ChatMessage(
                 id = UUID.randomUUID().toString(),
-                content = content,
+                content = content, // Save original content, not augmented
                 role = MessageRole.USER,
                 timestamp = System.currentTimeMillis(),
-                sessionId = sessionId
+                sessionId = sessionId,
+                ragContext = ragContext // Save RAG context as separate field
             )
             sessionFileStorage.addMessageToSession(session, userMessage, storageLocation)
         }
@@ -872,6 +916,22 @@ class ChatRepositoryImpl @Inject constructor(
             messages = updatedMessages,
             systemPrompt = systemPrompt
         )
+        
+        // Replace the last user message content with augmented version for API call
+        // This ensures we send augmented content to API but keep original in session history
+        val messagesForApi = messages.mapIndexed { index, message ->
+            if (index == messages.size - 1 && message.role == "user") {
+                // This is the last user message - replace with augmented content
+                ChatMessageDto(
+                    role = message.role,
+                    content = augmentedContent,
+                    toolCallId = message.toolCallId,
+                    toolCalls = message.toolCalls
+                )
+            } else {
+                message
+            }
+        }
         
         // Initialize variables for streaming with tool call tracking
         var accumulatedContent = ""
@@ -903,9 +963,10 @@ class ChatRepositoryImpl @Inject constructor(
         Log.d(TAG, "Available MCP tools: ${mcpTools.size}")
 
         // Stream response from API with metadata callback and tool calling support
+        // Use messagesForApi which has augmented content for the last user message
         try {
             chatApi.sendMessage(
-                messages, 
+                messagesForApi, 
                 modelId, 
                 stream = true,
                 onMetadata = { metadata ->
@@ -942,7 +1003,8 @@ class ChatRepositoryImpl @Inject constructor(
             }
             
             // Execute tool calls iteratively - AI can make multiple rounds of tool calls
-            var currentMessages = messages.toMutableList()
+            // Use messagesForApi which has augmented content for the last user message
+            var currentMessages = messagesForApi.toMutableList()
             var roundNumber = 1
             val maxRounds = 5
             
@@ -1193,6 +1255,7 @@ class ChatRepositoryImpl @Inject constructor(
         sessionFileStorage.addMessageToSession(session, assistantMessage, storageLocation)
         
         // Generate title if this is the first user message
+        // Use original content (not augmented) for title generation
         if (isFirstUserMessage) {
             try {
                 CoroutineScope(Dispatchers.IO).launch {

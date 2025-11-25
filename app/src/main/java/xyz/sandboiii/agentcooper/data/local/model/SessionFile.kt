@@ -75,7 +75,8 @@ data class ChatMessageSerializable(
     val totalCost: Double? = null,
     val summarizationContent: String? = null,
     val toolCalls: List<ToolCallSerializable>? = null,
-    val toolResults: List<ToolResultSerializable>? = null
+    val toolResults: List<ToolResultSerializable>? = null,
+    val ragContext: String? = null // RAG context chunks used for augmentation
 ) {
     /**
      * Преобразует доменную модель ChatMessage в сериализуемую модель.
@@ -100,7 +101,8 @@ data class ChatMessageSerializable(
                 },
                 toolResults = message.toolResults?.map { 
                     ToolResultSerializable(it.toolCallId, it.toolName, it.result, it.isError) 
-                }
+                },
+                ragContext = message.ragContext
             )
         }
     }
@@ -127,7 +129,8 @@ data class ChatMessageSerializable(
             },
             toolResults = toolResults?.map { 
                 xyz.sandboiii.agentcooper.domain.model.ToolResult(it.toolCallId, it.toolName, it.result, it.isError) 
-            }
+            },
+            ragContext = ragContext
         )
     }
 }

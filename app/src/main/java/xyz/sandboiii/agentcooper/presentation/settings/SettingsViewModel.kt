@@ -62,6 +62,9 @@ class SettingsViewModel @Inject constructor(
     private val _migrationSuccess = MutableStateFlow(false)
     val migrationSuccess: StateFlow<Boolean> = _migrationSuccess.asStateFlow()
     
+    private val _ragEnabled = MutableStateFlow(false)
+    val ragEnabled: StateFlow<Boolean> = _ragEnabled.asStateFlow()
+    
     val temperature = preferencesManager.temperature
     
     init {
@@ -70,6 +73,7 @@ class SettingsViewModel @Inject constructor(
         loadWelcomeMessageEnabled()
         loadTokenThreshold()
         loadStorageLocation()
+        loadRagEnabled()
     }
     
     fun updateTemperature(newTemp: Float) {
@@ -318,6 +322,29 @@ class SettingsViewModel @Inject constructor(
     
     fun clearMigrationSuccess() {
         _migrationSuccess.value = false
+    }
+    
+    private fun loadRagEnabled() {
+        viewModelScope.launch {
+            try {
+                val enabled = preferencesManager.getRagEnabled()
+                _ragEnabled.value = enabled
+            } catch (e: Exception) {
+                _errorMessage.value = "Ошибка загрузки настроек RAG: ${e.message}"
+                _ragEnabled.value = false
+            }
+        }
+    }
+    
+    fun updateRagEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            try {
+                preferencesManager.setRagEnabled(enabled)
+                _ragEnabled.value = enabled
+            } catch (e: Exception) {
+                _errorMessage.value = "Ошибка сохранения настроек RAG: ${e.message}"
+            }
+        }
     }
 }
 

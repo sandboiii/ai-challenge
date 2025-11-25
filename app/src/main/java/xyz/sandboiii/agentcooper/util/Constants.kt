@@ -14,8 +14,12 @@ object Constants {
     const val PREF_TEMPERATURE = "temperature"
     const val PREF_TOKEN_THRESHOLD = "token_threshold"
     const val PREF_STORAGE_LOCATION = "storage_location"
+    const val PREF_RAG_ENABLED = "rag_enabled"
     const val PREF_DATASTORE_NAME = "agent_cooper_prefs"
     const val DEFAULT_SESSIONS_DIR_NAME = "sessions"
+    
+    // RAG API Configuration
+    const val RAG_BASE_URL = "http://10.0.2.2:8000" // Android Emulator localhost
     
     const val DEFAULT_TEMPERATURE = 0.7f
     const val MIN_TEMPERATURE = 0.0f
