@@ -36,13 +36,20 @@ class RAGRepository @Inject constructor(
      * @param k Optional number of context chunks to retrieve (default: 3)
      * @return RAGAugmentationResult containing the augmented prompt and context chunks, or original query if augmentation fails
      */
-    suspend fun getAugmentedPrompt(rawQuery: String, k: Int = 3): RAGAugmentationResult {
+    suspend fun getAugmentedPrompt(rawQuery: String, k: Int = 5): RAGAugmentationResult {
         return try {
             val request = AugmentRequest(query = rawQuery, k = k)
             val response = ragApiService.augmentQuery(request)
-            Log.d(TAG, "Query augmented successfully. Original: ${response.original_query}")
+            Log.d(TAG, "Query augmented successfully. Original: ${response.original_query}, Context chunks: ${response.context_chunks.size}")
+            
+            // Build the augmented prompt from context chunks
+            val augmentedPrompt = buildAugmentedPrompt(
+                originalQuery = response.original_query,
+                contextChunks = response.context_chunks
+            )
+            
             RAGAugmentationResult(
-                augmentedPrompt = response.suggested_prompt,
+                augmentedPrompt = augmentedPrompt,
                 contextChunks = response.context_chunks
             )
         } catch (e: Exception) {
@@ -52,6 +59,33 @@ class RAGRepository @Inject constructor(
                 augmentedPrompt = rawQuery,
                 contextChunks = null
             )
+        }
+    }
+    
+    /**
+     * Builds an augmented prompt from context chunks and original query.
+     * Format: Context section with numbered chunks, followed by the question and instruction.
+     * 
+     * @param originalQuery The original user query
+     * @param contextChunks List of context chunks retrieved from the vector store
+     * @return Formatted prompt string with context and question
+     */
+    private fun buildAugmentedPrompt(originalQuery: String, contextChunks: List<String>): String {
+        if (contextChunks.isEmpty()) {
+            return originalQuery
+        }
+        
+        val contextSection = buildString {
+            append("Контекст:\n")
+            contextChunks.forEachIndexed { index, chunk ->
+                append("[Контекст ${index + 1}]: $chunk\n\n")
+            }
+        }
+        
+        return buildString {
+            append(contextSection.trimEnd())
+            append("\n\nВопрос: $originalQuery\n\n")
+            append("Пожалуйста, ответь на вопрос на основе предоставленного контекста.")
         }
     }
     

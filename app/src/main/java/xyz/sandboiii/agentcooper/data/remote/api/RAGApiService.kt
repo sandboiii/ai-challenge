@@ -40,8 +40,7 @@ data class AugmentRequest(
 @Serializable
 data class AugmentResponse(
     val original_query: String,
-    val context_chunks: List<String>,
-    val suggested_prompt: String
+    val context_chunks: List<String>
 )
 
 /**
@@ -107,7 +106,7 @@ class RAGApiService @Inject constructor() {
     /**
      * Augments a user query with relevant context from the vector store
      * @param request AugmentRequest containing the query and optional k parameter
-     * @return AugmentResponse containing the original query, context chunks, and suggested prompt
+     * @return AugmentResponse containing the original query and context chunks
      * @throws Exception if the request fails (network error, 5xx, or serialization issue)
      */
     suspend fun augmentQuery(request: AugmentRequest): AugmentResponse {
@@ -151,4 +150,5 @@ class RAGApiService @Inject constructor() {
         }
     }
 }
+
 
